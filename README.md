@@ -60,11 +60,24 @@ deploy; it asks for `ASSEMBLYAI_API_KEY` and nothing else:
 (Anyone with the URL can then start sessions billed to that key — Render's
 free plan is a good fit for demos.)
 
-**GitHub Pages (static — scripted demo only, no tokens/mic):** `.github/workflows/deploy.yml`
-builds the site and deploys via `actions/deploy-pages` on every push to `main`.
-The repo owner must enable it once: *Settings → Pages → Source: GitHub Actions*
-(and allow workflows under *Settings → Actions*). The static build
-automatically runs in scripted-demo mode because no backend answers `/api/health`.
+**GitHub Pages (static demo — already configured):** this repo's Pages site deploys
+the committed `docs/` folder from `main` (Settings → Pages → Source: *Deploy from a
+branch*, `main` / `/docs`). The static build automatically runs in scripted-demo mode
+because no backend answers `/api/health`. After changing frontend code, regenerate and
+push:
+
+```bash
+npm run deploy:docs   # rebuilds dist/ into docs/
+git add docs && git commit -m "chore: refresh docs/ build" && git push
+```
+
+**Optional — CI deploys instead of committing `docs/`:** a ready-made workflow lives at
+`.github/workflows/deploy.yml` (build + `actions/deploy-pages`, runs on every push to
+`main`). To switch over (repo owner, two toggles):
+1. [Settings → Actions → General](https://github.com/Elle31416/casa-verde-voice-order-agent/settings/actions) → *Allow all actions and reusable workflows* → Save
+2. [Settings → Pages](https://github.com/Elle31416/casa-verde-voice-order-agent/settings/pages) → Source: **GitHub Actions** → Save
+
+Then remove `docs/` (or keep it as a fallback) and every push to `main` deploys via CI.
 
 The production build uses base path `/casa-verde-voice-order-agent/` for Pages;
 the Node server serves the same `dist/` at `/` on Render.

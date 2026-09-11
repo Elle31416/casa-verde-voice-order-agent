@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/index.mjs",
-    "serve": "npm run build && node server/index.mjs"
+    "serve": "npm run build && node server/index.mjs",
+    "deploy:docs": "npm run build && rm -rf docs && cp -r dist docs && touch docs/.nojekyll"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
