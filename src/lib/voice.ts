@@ -158,6 +158,39 @@ const PLAYBACK_WORKLET = `
 const blobUrl = (code: string) =>
   URL.createObjectURL(new Blob([code], { type: 'application/javascript' }))
 
+/**
+ * Creates an AudioContext pinned to the wire rate, falling back to the
+ * device's default rate when a browser rejects 24 kHz with NotSupportedError.
+ * The capture/playback worklets resample from whatever rate the context
+ * actually runs at, so this keeps mic start from hard-failing.
+ */
+function createAudioContext(): AudioContext {
+  try {
+    return new AudioContext({ sampleRate: WIRE_RATE })
+  } catch {
+    return new AudioContext()
+  }
+}
+
+/** Maps getUserMedia rejections to short, actionable messages. */
+function micErrorMessage(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : ''
+  switch (name) {
+    case 'NotAllowedError':
+      return 'microphone access was blocked — allow the mic (and any embed permission) and try again'
+    case 'NotFoundError':
+      return 'no microphone was found — plug one in and try again'
+    case 'NotReadableError':
+      return 'the microphone is in use by another app — close it and try again'
+    case 'OverconstrainedError':
+      return 'the microphone does not support the required settings'
+    case 'SecurityError':
+      return 'microphone access is disabled on this page (HTTPS + mic permission required)'
+    default:
+      return error instanceof Error ? error.message : 'could not access the microphone'
+  }
+}
+
 function bytesToB64(bytes: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -236,30 +269,46 @@ export function createVoiceSession(cb: VoiceCallbacks): VoiceSessionHandle {
     cb.onStatus('connecting')
     stopping = false
     try {
+      if (!window.isSecureContext) {
+        return fail('microphone needs a secure (HTTPS) page')
+      }
       if (!navigator.mediaDevices?.getUserMedia) {
         return fail('this browser has no microphone support')
       }
+
+      // Create and resume the audio contexts while still inside the user
+      // gesture, so autoplay policies cannot leave them suspended. The
+      // worklets resample to the wire rate no matter what rate we get.
+      captureCtx = createAudioContext()
+      playbackCtx = createAudioContext()
+      const resume = Promise.all([
+        captureCtx.resume().catch(() => undefined),
+        playbackCtx.resume().catch(() => undefined),
+      ])
+
       const res = await fetch(apiUrl('/api/token'))
       if (!res.ok) {
         return fail(res.status === 503 ? 'voice backend not running' : 'token request failed')
       }
       const { token, agent_id } = (await res.json()) as { token: string; agent_id: string }
 
-      captureCtx = new AudioContext({ sampleRate: WIRE_RATE })
-      playbackCtx = new AudioContext({ sampleRate: WIRE_RATE })
-      await Promise.all([captureCtx.resume(), playbackCtx.resume()])
+      await resume
 
       playbackNode = await addWorklet(playbackCtx, PLAYBACK_WORKLET, 'casa-playback')
       playbackNode.connect(playbackCtx.destination)
 
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
-      })
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        })
+      } catch (error) {
+        return fail(micErrorMessage(error))
+      }
       const capture = await addWorklet(captureCtx, CAPTURE_WORKLET, 'casa-capture')
       captureCtx.createMediaStreamSource(micStream).connect(capture)
       capture.port.onmessage = ({ data }: MessageEvent<ArrayBuffer>) => {
