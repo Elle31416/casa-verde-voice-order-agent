@@ -1,5 +1,6 @@
 # One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent
-# The backend (server/index.mjs) holds ASSEMBLYAI_API_KEY and serves the built frontend.
+# The backend (server/index.mjs) holds secrets, serves the frontend, and exposes
+# authenticated phone-agent tools plus the optional Twilio media bridge.
 services:
   - type: web
     name: casa-verde-voice-order-agent
@@ -10,9 +11,29 @@ services:
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
     envVars:
-      # Render prompts for the key during Blueprint creation; it never lives in git.
       - key: ASSEMBLYAI_API_KEY
         sync: false
-      # Optional: pin an existing agent id instead of creating/updating by name.
       - key: AGENT_ID
         value: ''
+      # Required for public phone-agent tool endpoints. Render prompts for it.
+      - key: SHARED_SECRET
+        sync: false
+      - key: REQUIRE_PHONE_AUTH
+        value: 'true'
+      # Set to the deployed https origin, then restart so the phone agent is published.
+      - key: PUBLIC_URL
+        sync: false
+      - key: PHONE_BACKEND_URL
+        sync: false
+      - key: PHONE_AGENT_ID
+        value: ''
+      # Optional Twilio phone bridge.
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_STREAM_SECRET
+        sync: false
+      # Optional real receipt delivery; otherwise /receipt returns a mock receipt.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RECEIPT_FROM_EMAIL
+        sync: false
