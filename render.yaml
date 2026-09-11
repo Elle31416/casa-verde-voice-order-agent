@@ -18,8 +18,10 @@ services:
       # Required for public phone-agent tool endpoints. Render prompts for it.
       - key: SHARED_SECRET
         sync: false
+      # Keep false so the browser app can boot before a phone secret is entered.
+      # Set true after SHARED_SECRET has been configured to enforce phone auth.
       - key: REQUIRE_PHONE_AUTH
-        value: 'true'
+        value: 'false'
       # Set to the deployed https origin, then restart so the phone agent is published.
       - key: PUBLIC_URL
         sync: false

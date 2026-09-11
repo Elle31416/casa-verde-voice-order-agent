@@ -85,6 +85,18 @@ local `.env` file.
 missing. When the flag is false, the server still starts, but `/menu`, `/order`,
 `/payment`, and `/receipt` return `503` until a shared secret is configured.
 
+### Render startup troubleshooting
+
+The Render Blueprint deliberately defaults `REQUIRE_PHONE_AUTH` to `false`, so the
+browser app can deploy before phone secrets are entered. If Render logs say
+`REQUIRE_PHONE_AUTH=true but SHARED_SECRET is missing`, open the service's Environment
+settings and either:
+
+1. add a private `SHARED_SECRET` and keep `REQUIRE_PHONE_AUTH=true`; or
+2. set `REQUIRE_PHONE_AUTH=false` for a browser/manual-order deployment.
+
+Do not put the secret in `render.yaml` or the deploy URL.
+
 ## 3. Connect a phone number
 
 ### Twilio media bridge included in this repository
@@ -221,6 +233,8 @@ For the full phone flow, use the Render link, set `PUBLIC_URL` and `PHONE_BACKEN
 ## Static publishing
 
 GitHub Pages runs the browser UI in scripted-demo mode because it has no backend.
+The repository's Pages site must use the current Arena branch (`arena/01a09055-casa-verde-voice-order-agent`) with `/docs` if you want this PR's latest static build immediately. Alternatively, merge the PR into `main` and keep the existing `main` / `/docs` Pages source.
+
 After frontend changes, refresh the committed static build:
 
 ```bash
