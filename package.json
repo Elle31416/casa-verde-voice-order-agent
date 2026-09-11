@@ -1,5 +1,5 @@
 {
-  "name": "my-app",
+  "name": "casa-verde-voice-order-agent",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -23,5 +23,6 @@
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vite-plugin-svgr": "^4.5.0"
-  }
+  },
+  "description": "Casa Verde — a voice AI host that takes restaurant orders and builds the kitchen ticket live."
 }
