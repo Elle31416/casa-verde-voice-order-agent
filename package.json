@@ -1,12 +1,15 @@
 {
-  "name": "my-app",
+  "name": "casa-verde-voice-order-agent",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite optimize && vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/index.mjs",
+    "serve": "npm run build && node server/index.mjs",
+    "deploy:docs": "npm run build && rm -rf docs && cp -r dist docs && touch docs/.nojekyll"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -23,5 +26,6 @@
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vite-plugin-svgr": "^4.5.0"
-  }
+  },
+  "description": "Casa Verde — a voice AI host that takes restaurant orders and builds the kitchen ticket live."
 }

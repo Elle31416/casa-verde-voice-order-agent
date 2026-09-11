@@ -16,7 +16,10 @@ const svgImportPlugin = () => ({
 });
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ command }) => ({
+  // Absolute base only for production builds (GitHub Pages project site);
+  // dev server stays at "/" so it works behind any proxy port.
+  base: command === 'build' ? '/casa-verde-voice-order-agent/' : '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -34,7 +37,22 @@ export default defineConfig(() => ({
     }),
   ],
   server: {
+    host: '0.0.0.0',
+    port: 5173,
     allowedHosts: true as const,
     hmr: false,
+    // The Node backend (see server/index.mjs) holds the AssemblyAI key and
+    // mints short-lived tokens; the browser talks to it same-origin.
+    proxy: {
+      '/api': {
+        target: process.env.API_TARGET || 'http://localhost:8787',
+        changeOrigin: true,
+      },
+    },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 4173,
+    allowedHosts: true as const,
   },
 }))

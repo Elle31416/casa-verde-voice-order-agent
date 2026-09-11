@@ -1,0 +1,18 @@
+# One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent
+# The backend (server/index.mjs) holds ASSEMBLYAI_API_KEY and serves the built frontend.
+services:
+  - type: web
+    name: casa-verde-voice-order-agent
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.mjs
+    healthCheckPath: /api/health
+    envVars:
+      # Render prompts for the key during Blueprint creation; it never lives in git.
+      - key: ASSEMBLYAI_API_KEY
+        sync: false
+      # Optional: pin an existing agent id instead of creating/updating by name.
+      - key: AGENT_ID
+        value: ''

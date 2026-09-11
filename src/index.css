@@ -1,26 +1,166 @@
 @import "tailwindcss";
 
-/* THESE ARE PLACEHOLDER FOR EMPTY APP, FEEL FREE TO REPLACE WITH DESIRED DESIGN */
-
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --color-text-muted: oklch(0.9015 0.0154 241.79);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo,
+    Consolas, monospace;
+
+  --color-ink: oklch(0.97 0.012 152);
+  --color-muted: oklch(0.74 0.022 158);
+  --color-faint: oklch(0.6 0.02 158);
+  --color-surface: oklch(0.165 0.024 162);
+  --color-surface-2: oklch(0.205 0.03 162);
+  --color-line: oklch(0.32 0.032 160);
+
+  --color-verde-50: oklch(0.97 0.03 155);
+  --color-verde-100: oklch(0.93 0.055 155);
+  --color-verde-200: oklch(0.87 0.095 155);
+  --color-verde-300: oklch(0.8 0.13 156);
+  --color-verde-400: oklch(0.735 0.155 156);
+  --color-verde-500: oklch(0.66 0.15 157);
+  --color-verde-600: oklch(0.555 0.13 157);
+  --color-verde-700: oklch(0.455 0.1 157);
+  --color-verde-800: oklch(0.355 0.07 157);
+  --color-verde-900: oklch(0.265 0.048 157);
+  --color-verde-950: oklch(0.19 0.035 158);
+  --color-lima: oklch(0.87 0.19 120);
+
+  --animate-pop: pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  --animate-fade-up: fade-up 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  --animate-blink: blink 0.9s steps(2, start) infinite;
+  --animate-ring: ring 1.6s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+  --animate-eq: eq 0.9s ease-in-out infinite;
+  --animate-drift: drift 14s ease-in-out infinite alternate;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) scale(1.08);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: oklch(0.145 0.022 162);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
 .bg-dotgrid-glow {
-  background-color: oklch(0.1638 0 0);
+  background-color: oklch(0.145 0.022 162);
   background-image:
     radial-gradient(
-      circle at 50% 118%,
-      oklch(0.41 0.14 250 / 45%) 0%,
-      oklch(0.41 0.14 250 / 22%) 22%,
-      oklch(0.41 0.14 250 / 10%) 32%,
-      oklch(0.41 0.14 250 / 4%) 38%,
-      transparent 45%
+      circle at 50% -10%,
+      oklch(0.55 0.13 157 / 26%) 0%,
+      oklch(0.55 0.13 157 / 12%) 26%,
+      oklch(0.55 0.13 157 / 4%) 40%,
+      transparent 52%
     ),
-    radial-gradient(oklch(0.41 0.14 250 / 4%) 1px, transparent 1px);
+    radial-gradient(oklch(0.7 0.1 157 / 4.5%) 1px, transparent 1px);
   background-size:
     100% 100%,
-    16px 16px;
+    18px 18px;
   background-position: center, center;
+}
+
+.glass {
+  background: oklch(0.185 0.026 162 / 62%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+::selection {
+  background: oklch(0.735 0.155 156 / 45%);
+}
+
+.text-gradient-verde {
+  background: linear-gradient(
+    100deg,
+    oklch(0.93 0.06 155),
+    oklch(0.78 0.15 152) 38%,
+    oklch(0.87 0.19 120) 72%,
+    oklch(0.72 0.14 157)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ticket-edge {
+  -webkit-mask-image:
+    linear-gradient(black, black),
+    radial-gradient(circle at 5px 5px, transparent 5px, black 5.5px),
+    radial-gradient(circle at 5px calc(100% - 5px), transparent 5px, black 5.5px);
+  -webkit-mask-composite: source-over;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
