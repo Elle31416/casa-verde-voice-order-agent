@@ -4,7 +4,13 @@ const STATS = [
   { value: '38', label: 'languages understood' },
 ];
 
-export function Hero({ mode = 'checking' }: { mode?: 'checking' | 'live' | 'demo' }) {
+export function Hero({
+  mode = 'checking',
+  ordersApiAvailable = false,
+}: {
+  mode?: 'checking' | 'live' | 'demo'
+  ordersApiAvailable?: boolean
+}) {
   return (
     <section id="top" className="relative overflow-hidden">
       {/* ambient glows */}
@@ -25,7 +31,9 @@ export function Hero({ mode = 'checking' }: { mode?: 'checking' | 'live' | 'demo
           </span>
           {mode === 'live'
             ? 'Verde is live — real voice agent, powered by AssemblyAI'
-            : 'Verde is online · tonight’s menu loaded'}
+            : ordersApiAvailable
+              ? 'Live ordering is ready · kitchen API connected'
+              : 'Verde is online · tonight’s menu loaded'}
         </p>
 
         <h1

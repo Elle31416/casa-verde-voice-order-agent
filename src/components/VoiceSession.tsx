@@ -57,6 +57,8 @@ function LiveBody({ onTool, sendPulse }: VoiceSessionProps) {
   const [lines, setLines] = useState<Line[]>([])
   const [elapsed, setElapsed] = useState(0)
   const sessionRef = useRef<ReturnType<typeof createVoiceSession> | null>(null)
+  const onToolRef = useRef(onTool)
+  onToolRef.current = onTool
   const userLineRef = useRef<number | null>(null)
   const agentLineRef = useRef<number | null>(null)
   const liveReplyRef = useRef<string | null>(null)
@@ -123,7 +125,7 @@ function LiveBody({ onTool, sendPulse }: VoiceSessionProps) {
         onTool: async (name, args) => {
           const id = pushLine('tool', `${name}…`, false)
           try {
-            const result = await onTool(name, args)
+            const result = await onToolRef.current(name, args)
             patchLine(id, { text: toolSummary(name, args, result), done: true })
             return result
           } catch (error) {

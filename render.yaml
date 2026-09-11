@@ -1,18 +1,46 @@
-# One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent
-# The backend (server/index.mjs) holds ASSEMBLYAI_API_KEY and serves the built frontend.
+# One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09055-casa-verde-voice-order-agent
+# The backend (server/index.mjs) holds secrets, serves the frontend, and exposes
+# authenticated phone-agent tools plus the optional Twilio media bridge.
 services:
   - type: web
     name: casa-verde-voice-order-agent
     runtime: node
     plan: free
     rootDir: .
+    branch: arena/01a09055-casa-verde-voice-order-agent
     buildCommand: npm ci && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
+    autoDeployTrigger: commit
     envVars:
-      # Render prompts for the key during Blueprint creation; it never lives in git.
       - key: ASSEMBLYAI_API_KEY
         sync: false
-      # Optional: pin an existing agent id instead of creating/updating by name.
       - key: AGENT_ID
+        value: ''
+      # Required for public phone-agent tool endpoints. Render prompts for it.
+      - key: SHARED_SECRET
+        sync: false
+      # Keep false so the browser app can boot before a phone secret is entered.
+      # Set true after SHARED_SECRET has been configured to enforce phone auth.
+      - key: REQUIRE_PHONE_AUTH
+        value: 'false'
+      - key: FAIL_ON_MISSING_PHONE_SECRET
+        value: 'false'
+      # Matches this service's default Render hostname, so the first deploy is one click.
+      # Override these if you use a custom domain or a different service name.
+      - key: PUBLIC_URL
+        value: https://casa-verde-voice-order-agent.onrender.com
+      - key: PHONE_BACKEND_URL
+        value: https://casa-verde-voice-order-agent.onrender.com
+      - key: PHONE_AGENT_ID
+        value: ''
+      # Optional Twilio phone bridge. Add values later in Render Environment settings.
+      - key: TWILIO_AUTH_TOKEN
+        value: ''
+      - key: TWILIO_STREAM_SECRET
+        value: ''
+      # Optional real receipt delivery; otherwise /receipt returns a mock receipt.
+      - key: RESEND_API_KEY
+        value: ''
+      - key: RECEIPT_FROM_EMAIL
         value: ''
