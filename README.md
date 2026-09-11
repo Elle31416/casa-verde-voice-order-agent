@@ -211,6 +211,13 @@ launch still needs:
 - a verified AssemblyAI/Twilio telephony configuration and end-to-end DTMF tests;
 - a real email provider configuration if receipts must be delivered.
 
+## Single-link deployment
+
+- **Full-stack deployment:** [Deploy the current branch to Render](https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09055-casa-verde-voice-order-agent). Render serves the UI and backend from one HTTPS origin. Enter secrets in Render's environment settings; never put them in the URL or repository.
+- **Browser-only demo:** [Open the GitHub Pages demo](https://elle31416.github.io/casa-verde-voice-order-agent/). It has no backend, phone tools, payment, or receipt delivery.
+
+For the full phone flow, use the Render link, set `PUBLIC_URL` and `PHONE_BACKEND_URL` to the resulting Render URL, then restart the service so the phone agent is published.
+
 ## Static publishing
 
 GitHub Pages runs the browser UI in scripted-demo mode because it has no backend.
