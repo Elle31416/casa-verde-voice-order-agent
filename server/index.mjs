@@ -515,7 +515,9 @@ async function aai(path, { method = 'GET', body } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
   const text = await response.text()
-  if (!response.ok) throw new Error(`${method} ${path} -> ${response.status}: ${text.slice(0, 300)}`)
+  // Do not include upstream response bodies in logs: providers can echo request
+  // details, and error payloads should never become a secret-leak channel.
+  if (!response.ok) throw new Error(`${method} ${path} -> ${response.status}`)
   return text ? JSON.parse(text) : {}
 }
 

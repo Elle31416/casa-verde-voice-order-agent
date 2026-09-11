@@ -25,6 +25,19 @@ src/                       browser UI and live AssemblyAI microphone session
 The phone agent is published only when `ASSEMBLYAI_API_KEY`, `SHARED_SECRET`, and a
 public backend URL are configured. The browser agent can still run independently.
 
+## Secret handling
+
+- Real credentials belong only in environment variables or the hosting provider's
+  secret store. `.env*` files are ignored by Git except for `.env.example`.
+- The browser bundle never receives the AssemblyAI key, Twilio secrets, Resend key, or
+  shared tool secret. The server mints short-lived AssemblyAI tokens and signs Twilio
+  webhooks server-side.
+- The included Twilio bridge uses `TWILIO_AUTH_TOKEN` to verify inbound webhook
+  signatures; it does not need a Twilio REST API key pair because it does not make
+  outbound Twilio REST requests. Do not add API key secrets to source files.
+- Any AssemblyAI or Twilio credential pasted into chat, a ticket, a terminal log, or
+  a repository should be revoked and replaced.
+
 ## 1. Install and run the browser app
 
 ```bash
