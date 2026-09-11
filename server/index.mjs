@@ -54,6 +54,7 @@ loadEnv()
 const API_KEY = process.env.ASSEMBLYAI_API_KEY || ''
 const SHARED_SECRET = process.env.SHARED_SECRET || ''
 const REQUIRE_PHONE_AUTH = process.env.REQUIRE_PHONE_AUTH === 'true'
+const FAIL_ON_MISSING_PHONE_SECRET = process.env.FAIL_ON_MISSING_PHONE_SECRET === 'true'
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '')
 const PHONE_BACKEND_URL = (process.env.PHONE_BACKEND_URL || PUBLIC_URL).replace(/\/$/, '')
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || ''
@@ -78,8 +79,12 @@ const AGENT_DEF = JSON.parse(readFileSync(join(ROOT, 'server/agent.json'), 'utf8
 const PHONE_AGENT_TEMPLATE = JSON.parse(readFileSync(join(ROOT, 'server/phone-agent.json'), 'utf8'))
 
 if (REQUIRE_PHONE_AUTH && !configuredSecret(SHARED_SECRET)) {
-  console.error('REQUIRE_PHONE_AUTH=true but SHARED_SECRET is missing or still a placeholder; refusing to start.')
-  process.exit(1)
+  const message = 'REQUIRE_PHONE_AUTH=true but SHARED_SECRET is missing or still a placeholder.'
+  if (FAIL_ON_MISSING_PHONE_SECRET) {
+    console.error(`${message} FAIL_ON_MISSING_PHONE_SECRET=true; refusing to start.`)
+    process.exit(1)
+  }
+  console.warn(`${message} Phone tools are disabled until the secret is configured; continuing browser deployment.`)
 }
 
 // The server keeps its own menu and prices. Client-supplied prices are never

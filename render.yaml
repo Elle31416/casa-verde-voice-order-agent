@@ -22,6 +22,8 @@ services:
       # Set true after SHARED_SECRET has been configured to enforce phone auth.
       - key: REQUIRE_PHONE_AUTH
         value: 'false'
+      - key: FAIL_ON_MISSING_PHONE_SECRET
+        value: 'false'
       # Set to the deployed https origin, then restart so the phone agent is published.
       - key: PUBLIC_URL
         sync: false

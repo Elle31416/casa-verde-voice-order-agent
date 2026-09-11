@@ -81,19 +81,18 @@ URL and restart the backend. With the AssemblyAI key configured, startup creates
 updates **Casa Verde · Phone Order Agent** and stores its id as `PHONE_AGENT_ID` in the
 local `.env` file.
 
-`REQUIRE_PHONE_AUTH=true` makes the server refuse to start if `SHARED_SECRET` is
-missing. When the flag is false, the server still starts, but `/menu`, `/order`,
-`/payment`, and `/receipt` return `503` until a shared secret is configured.
+`REQUIRE_PHONE_AUTH=true` enables the phone-agent configuration path. If
+`SHARED_SECRET` is missing, the server keeps the browser deployment alive but disables
+`/menu`, `/order`, `/payment`, and `/receipt` with `503`. Set
+`FAIL_ON_MISSING_PHONE_SECRET=true` when a deployment must refuse startup instead.
 
 ### Render startup troubleshooting
 
-The Render Blueprint deliberately defaults `REQUIRE_PHONE_AUTH` to `false`, so the
-browser app can deploy before phone secrets are entered. If Render logs say
-`REQUIRE_PHONE_AUTH=true but SHARED_SECRET is missing`, open the service's Environment
-settings and either:
-
-1. add a private `SHARED_SECRET` and keep `REQUIRE_PHONE_AUTH=true`; or
-2. set `REQUIRE_PHONE_AUTH=false` for a browser/manual-order deployment.
+The Render Blueprint defaults `REQUIRE_PHONE_AUTH` to `false`, so the browser app can
+boot before phone secrets are entered. If Render logs say
+`REQUIRE_PHONE_AUTH=true but SHARED_SECRET is missing`, that is now a warning rather
+than a crash; either add a private `SHARED_SECRET` to enable phone tools or set
+`REQUIRE_PHONE_AUTH=false` for a browser/manual-order deployment.
 
 Do not put the secret in `render.yaml` or the deploy URL.
 
