@@ -1,4 +1,4 @@
-# One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent
+# One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09055-casa-verde-voice-order-agent
 # The backend (server/index.mjs) holds secrets, serves the frontend, and exposes
 # authenticated phone-agent tools plus the optional Twilio media bridge.
 services:
@@ -7,9 +7,11 @@ services:
     runtime: node
     plan: free
     rootDir: .
+    branch: arena/01a09055-casa-verde-voice-order-agent
     buildCommand: npm ci && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
+    autoDeployTrigger: commit
     envVars:
       - key: ASSEMBLYAI_API_KEY
         sync: false
@@ -24,20 +26,21 @@ services:
         value: 'false'
       - key: FAIL_ON_MISSING_PHONE_SECRET
         value: 'false'
-      # Set to the deployed https origin, then restart so the phone agent is published.
+      # Matches this service's default Render hostname, so the first deploy is one click.
+      # Override these if you use a custom domain or a different service name.
       - key: PUBLIC_URL
-        sync: false
+        value: https://casa-verde-voice-order-agent.onrender.com
       - key: PHONE_BACKEND_URL
-        sync: false
+        value: https://casa-verde-voice-order-agent.onrender.com
       - key: PHONE_AGENT_ID
         value: ''
-      # Optional Twilio phone bridge.
+      # Optional Twilio phone bridge. Add values later in Render Environment settings.
       - key: TWILIO_AUTH_TOKEN
-        sync: false
+        value: ''
       - key: TWILIO_STREAM_SECRET
-        sync: false
+        value: ''
       # Optional real receipt delivery; otherwise /receipt returns a mock receipt.
       - key: RESEND_API_KEY
-        sync: false
+        value: ''
       - key: RECEIPT_FROM_EMAIL
-        sync: false
+        value: ''
