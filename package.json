@@ -4,12 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite optimize && vite",
+    "dev": "vite",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "serve": "npm run build && node server/index.mjs",
-    "deploy:docs": "npm run build && rm -rf docs && cp -r dist docs && touch docs/.nojekyll"
+    "deploy:docs": "GITHUB_PAGES=true vite build && rm -rf docs && cp -r dist docs && touch docs/.nojekyll"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",

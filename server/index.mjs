@@ -55,12 +55,26 @@ const API_KEY = process.env.ASSEMBLYAI_API_KEY || ''
 const SHARED_SECRET = process.env.SHARED_SECRET || ''
 const REQUIRE_PHONE_AUTH = process.env.REQUIRE_PHONE_AUTH === 'true'
 const FAIL_ON_MISSING_PHONE_SECRET = process.env.FAIL_ON_MISSING_PHONE_SECRET === 'true'
-const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '')
+// On Render these are provided automatically, so PUBLIC_URL rarely needs to be
+// set by hand. Explicit PUBLIC_URL / PHONE_BACKEND_URL still win when set
+// (local tunnels, custom domains).
+const RENDER_PUBLIC_URL = (
+  process.env.RENDER_EXTERNAL_URL ||
+  (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '')
+).replace(/\/$/, '')
+const PUBLIC_URL = (process.env.PUBLIC_URL || RENDER_PUBLIC_URL).replace(/\/$/, '')
 const PHONE_BACKEND_URL = (process.env.PHONE_BACKEND_URL || PUBLIC_URL).replace(/\/$/, '')
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || ''
 const TWILIO_STREAM_SECRET = process.env.TWILIO_STREAM_SECRET || SHARED_SECRET
 const RESEND_API_KEY = process.env.RESEND_API_KEY || ''
 const RECEIPT_FROM_EMAIL = process.env.RECEIPT_FROM_EMAIL || ''
+// Optional split deployment: comma-separated origins allowed to call the API
+// cross-origin (e.g. a static frontend on another host). Empty = same-origin.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean)
+const BUILD_SHA = process.env.RENDER_GIT_COMMIT || process.env.GIT_SHA || ''
 
 function configuredSecret(value) {
   return Boolean(value && !String(value).includes('replace_with_') && !String(value).includes('your_'))
@@ -132,6 +146,16 @@ function bearerMatches(value) {
   if (!configuredSecret(SHARED_SECRET) || typeof value !== 'string') return false
   const prefix = 'Bearer '
   return value.startsWith(prefix) && sameSecret(value.slice(prefix.length), SHARED_SECRET)
+}
+
+function applyCors(req, res) {
+  const origin = req.headers.origin
+  if (typeof origin === 'string' && ALLOWED_ORIGINS.includes(origin.replace(/\/$/, ''))) {
+    res.setHeader('access-control-allow-origin', origin)
+    res.setHeader('vary', 'Origin')
+    return true
+  }
+  return false
 }
 
 function json(res, code, data) {
@@ -477,6 +501,7 @@ async function sendReceipt(payload) {
   if (RESEND_API_KEY && RECEIPT_FROM_EMAIL) {
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
         'Content-Type': 'application/json',
@@ -513,6 +538,7 @@ async function sendReceipt(payload) {
 async function aai(path, { method = 'GET', body } = {}) {
   const response = await fetch(API_BASE + path, {
     method,
+    signal: AbortSignal.timeout(15000),
     headers: {
       Authorization: `Bearer ${API_KEY}`,
       'Content-Type': 'application/json',
@@ -524,6 +550,13 @@ async function aai(path, { method = 'GET', body } = {}) {
   // details, and error payloads should never become a secret-leak channel.
   if (!response.ok) throw new Error(`${method} ${path} -> ${response.status}`)
   return text ? JSON.parse(text) : {}
+}
+
+function agentListOf(payload) {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.agents)) return payload.agents
+  if (Array.isArray(payload?.data)) return payload.data
+  return []
 }
 
 function hydratePhoneAgent() {
@@ -545,11 +578,18 @@ function hydratePhoneAgent() {
 async function ensureAgent(definition, envKey) {
   if (process.env[envKey]) {
     const id = process.env[envKey]
-    await aai(`/agents/${id}`, { method: 'PUT', body: definition })
-    return { id, name: definition.name }
+    try {
+      await aai(`/agents/${id}`, { method: 'PUT', body: definition })
+      return { id, name: definition.name }
+    } catch (error) {
+      // A pinned id can go stale (agent deleted in the dashboard). Fall
+      // through to the name lookup so startup heals instead of wedging.
+      console.warn(`Stored ${envKey}=${id} could not be updated (${error.message}); re-creating by name.`)
+      delete process.env[envKey]
+    }
   }
   const list = await aai('/agents')
-  const existing = (list.agents ?? []).find((item) => item.name === definition.name)
+  const existing = agentListOf(list).find((item) => item && item.name === definition.name)
   if (existing) {
     await aai(`/agents/${existing.id}`, { method: 'PUT', body: definition })
     saveEnv(envKey, existing.id)
@@ -593,7 +633,10 @@ if (API_KEY) {
 function twilioSignatureValid(req, params) {
   if (!configuredSecret(TWILIO_AUTH_TOKEN) || !validPublicUrl(PUBLIC_URL)) return false
   const signature = req.headers['x-twilio-signature']
-  if (typeof signature !== 'string') return false
+  if (typeof signature !== 'string' || !signature) return false
+  // Twilio signs the exact configured webhook URL, query string included, plus
+  // POST form params appended as key+value in sorted order. For GET requests
+  // the parameters already live in the query string, so params must be empty.
   const url = new URL(req.url, `${PUBLIC_URL}/`)
   const signedUrl = `${PUBLIC_URL}${url.pathname}${url.search}`
   const data = signedUrl + Object.keys(params).sort().map((key) => key + params[key]).join('')
@@ -628,13 +671,26 @@ twilioWss.on('connection', (twilioSocket) => {
   let streamSid = null
   let aaiSocket = null
   let closed = false
+  let aaiReady = false
   const pendingAudio = []
+
+  // session.end stops AssemblyAI billing immediately; just closing the socket
+  // leaves a billable 30-second resume window on every call.
+  const endAssemblySession = () => {
+    if (aaiSocket?.readyState === WebSocket.OPEN) {
+      try { aaiSocket.send(JSON.stringify({ type: 'session.end' })) } catch {}
+      setTimeout(() => { try { aaiSocket?.close() } catch {} }, 600)
+    } else {
+      try { aaiSocket?.close() } catch {}
+    }
+    aaiSocket = null
+  }
 
   const closeBridge = () => {
     if (closed) return
     closed = true
+    endAssemblySession()
     try { twilioSocket.close() } catch {}
-    try { aaiSocket?.close() } catch {}
   }
 
   const sendTwilio = (message) => {
@@ -646,30 +702,32 @@ twilioWss.on('connection', (twilioSocket) => {
   }
 
   const connectAssembly = (agentId) => {
-    if (!API_KEY || !agentId) return closeBridge()
+    if (!API_KEY || !agentId) {
+      console.error('phone bridge: missing API key or phone agent id; ending call')
+      return closeBridge()
+    }
     aaiSocket = new WebSocket('wss://agents.assemblyai.com/v1/ws', {
-      headers: { Authorization: API_KEY },
+      headers: { Authorization: `Bearer ${API_KEY}` },
     })
     aaiSocket.on('open', () => {
-      sendAssembly({
-        type: 'session.update',
-        session: {
-          agent_id: agentId,
-          input: { type: 'audio', format: { encoding: 'audio/pcmu', sample_rate: 8000 } },
-          output: { type: 'audio', format: { encoding: 'audio/pcmu', sample_rate: 8000 } },
-        },
-      })
-      while (pendingAudio.length) sendAssembly({ type: 'input.audio', audio: pendingAudio.shift() })
+      // agent_id is mutually exclusive with inline session fields: sending
+      // input/output here is rejected with agent_id_not_first. The μ-law
+      // telephony formats live on the stored phone agent instead, so μ-law
+      // audio passes through end to end with no resampling.
+      sendAssembly({ type: 'session.update', session: { agent_id: agentId } })
     })
     aaiSocket.on('message', async (raw) => {
       let message
       try { message = JSON.parse(String(raw)) } catch { return }
-      if (message.type === 'reply.audio' && typeof message.data === 'string' && streamSid) {
+      if (message.type === 'session.ready') {
+        aaiReady = true
+        while (pendingAudio.length) sendAssembly({ type: 'input.audio', audio: pendingAudio.shift() })
+      } else if (message.type === 'reply.audio' && typeof message.data === 'string' && streamSid) {
         sendTwilio({ event: 'media', streamSid, media: { payload: message.data } })
       } else if (message.type === 'input.speech.started') {
-        sendTwilio({ event: 'clear', streamSid })
+        if (streamSid) sendTwilio({ event: 'clear', streamSid })
       } else if (message.type === 'reply.done' && message.status === 'interrupted') {
-        sendTwilio({ event: 'clear', streamSid })
+        if (streamSid) sendTwilio({ event: 'clear', streamSid })
       } else if (message.type === 'tool.call') {
         const callId = String(message.call_id || '')
         const args = typeof message.arguments === 'string'
@@ -705,19 +763,23 @@ twilioWss.on('connection', (twilioSocket) => {
       return
     }
     if (message.event === 'media' && typeof message.media?.payload === 'string') {
-      if (aaiSocket?.readyState === WebSocket.OPEN) sendAssembly({ type: 'input.audio', audio: message.media.payload })
+      // Audio must only stream after session.ready; earlier frames are held
+      // briefly, then dropped rather than burst faster than real time.
+      if (aaiReady) sendAssembly({ type: 'input.audio', audio: message.media.payload })
       else if (pendingAudio.length < 100) pendingAudio.push(message.media.payload)
       return
     }
-    if (message.event === 'dtmf' && typeof message.dtmf?.digits === 'string') {
-      // AssemblyAI consumes this event as keypad input. Digits are never logged.
-      sendAssembly({ type: 'input.dtmf', digit: message.dtmf.digits })
+    if (message.event === 'dtmf') {
+      // The Voice Agent WebSocket has no DTMF input event: keypad tones reach
+      // AssemblyAI in-band with the μ-law audio already forwarded above.
+      // Digits are never logged. Verified keypad payment uses the AssemblyAI
+      // SIP telephony path instead of this media bridge (see README).
       return
     }
     if (message.event === 'stop') closeBridge()
   })
   twilioSocket.on('close', () => {
-    try { aaiSocket?.close() } catch {}
+    endAssemblySession()
   })
   twilioSocket.on('error', closeBridge)
 })
@@ -738,16 +800,36 @@ const MIME = {
   '.txt': 'text/plain',
 }
 
+const API_ROUTES = new Set(['/api/health', '/api/token', '/api/orders', '/menu', '/order', '/payment', '/receipt'])
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   const path = url.pathname
+  const corsAllowed = applyCors(req, res)
+
+  if (req.method === 'OPTIONS' && (API_ROUTES.has(path) || path.startsWith('/api/orders/'))) {
+    if (!corsAllowed) {
+      res.writeHead(404)
+      return res.end()
+    }
+    res.writeHead(204, {
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
+      'access-control-allow-headers': 'authorization, content-type',
+      'access-control-max-age': '600',
+    })
+    return res.end()
+  }
 
   if (path === '/api/health') {
     return json(res, 200, {
       ok: Boolean(API_KEY && agent),
       mode: API_KEY && agent ? 'live' : 'demo',
+      service: 'casa-verde-voice-order-agent',
+      ...(BUILD_SHA ? { build_sha: BUILD_SHA.slice(0, 12) } : {}),
       orders_available: true,
       phone_enabled: Boolean(phoneAgent && configuredSecret(TWILIO_AUTH_TOKEN) && validPublicUrl(PUBLIC_URL) && configuredSecret(TWILIO_STREAM_SECRET)),
+      phone_configured: Boolean(phoneAgent),
+      public_url: validPublicUrl(PUBLIC_URL) ? PUBLIC_URL : undefined,
       receipt_delivery: RESEND_API_KEY && RECEIPT_FROM_EMAIL ? 'email' : 'mock',
       agent,
       phone_agent: phoneAgent,
@@ -758,7 +840,11 @@ const server = http.createServer(async (req, res) => {
   if (path === '/api/token') {
     if (!API_KEY || !agent) return json(res, 503, { error: 'voice backend not configured' })
     try {
-      const data = await aai('/token?product=voice_agent&expires_in_seconds=60')
+      // GET /v1/token only takes expires_in_seconds (token redemption window;
+      // generous so mic-permission prompts cannot outlast it) and the optional
+      // session-duration cap. There is no `product` parameter.
+      const data = await aai('/token?expires_in_seconds=300&max_session_duration_seconds=3600')
+      if (!data?.token) throw new Error('token response had no token')
       return json(res, 200, { token: data.token, agent_id: agent.id })
     } catch {
       return json(res, 502, { error: 'could not mint a token' })
@@ -827,7 +913,9 @@ const server = http.createServer(async (req, res) => {
       return xml(res, 503, '<Response><Say>Phone ordering is not configured.</Say><Hangup /></Response>')
     }
     try {
-      const params = req.method === 'POST' ? await readForm(req) : Object.fromEntries(url.searchParams)
+      // GET requests carry their parameters in the query string, which is
+      // already part of the signed URL, so only POST bodies become params.
+      const params = req.method === 'POST' ? await readForm(req) : {}
       if (!twilioSignatureValid(req, params)) return xml(res, 403, '<Response><Say>Unauthorized.</Say><Hangup /></Response>')
       return xml(res, 200, twilioVoiceXml())
     } catch {
@@ -849,6 +937,12 @@ const server = http.createServer(async (req, res) => {
     return res.end('forbidden')
   }
   if (!isFile(full)) full = join(DIST, 'index.html')
+  if (!isFile(full)) {
+    // dist/ is missing: the frontend was never built. Signal it plainly so a
+    // failed Render build is obvious instead of a blank page.
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' })
+    return res.end('frontend build is missing (dist/ not found) — the deploy build step did not complete')
+  }
   try {
     const body = readFileSync(full)
     const ext = extname(full)
@@ -890,5 +984,6 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Casa Verde is up: http://localhost:${PORT}`)
-  if (phoneAgent && PUBLIC_URL) console.log(`Phone webhook: ${PUBLIC_URL}/twilio/voice`)
+  if (validPublicUrl(PUBLIC_URL)) console.log(`Public URL: ${PUBLIC_URL}`)
+  if (phoneAgent && validPublicUrl(PUBLIC_URL)) console.log(`Phone webhook: ${PUBLIC_URL}/twilio/voice`)
 })

@@ -1,46 +1,59 @@
-# One-click full-stack deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09055-casa-verde-voice-order-agent
-# The backend (server/index.mjs) holds secrets, serves the frontend, and exposes
-# authenticated phone-agent tools plus the optional Twilio media bridge.
+# One-click full-stack deploy (frontend + backend on one Render web service):
+# https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09119-casa-verde-voice-order-agent
+#
+# The backend (server/index.mjs) holds secrets, serves the built React app from
+# dist/, mints AssemblyAI tokens, exposes the authenticated phone-agent tools,
+# and runs the optional Twilio media bridge. PUBLIC_URL is derived automatically
+# from Render's RENDER_EXTERNAL_URL, so no URL configuration is needed unless
+# you use a custom domain (then set PUBLIC_URL in the dashboard).
 services:
   - type: web
     name: casa-verde-voice-order-agent
     runtime: node
     plan: free
-    rootDir: .
-    branch: arena/01a09055-casa-verde-voice-order-agent
-    buildCommand: npm ci && npm run build
+    branch: arena/01a09119-casa-verde-voice-order-agent
+    buildCommand: npm ci && npm run typecheck && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
     autoDeployTrigger: commit
     envVars:
+      # AssemblyAI key. Without it the site runs in scripted-demo mode and the
+      # manual order API still works.
       - key: ASSEMBLYAI_API_KEY
         sync: false
+      # Pinned agent ids. Leave empty: the server creates/updates agents by
+      # name on startup. Visible here so they can be pinned or rotated.
       - key: AGENT_ID
         value: ''
-      # Required for public phone-agent tool endpoints. Render prompts for it.
+      - key: PHONE_AGENT_ID
+        value: ''
+      # Authenticates the phone-agent remote tools (/menu, /order, /payment,
+      # /receipt). Render pre-generates a value; accept it or set your own.
       - key: SHARED_SECRET
         sync: false
-      # Keep false so the browser app can boot before a phone secret is entered.
-      # Set true after SHARED_SECRET has been configured to enforce phone auth.
+        generateValue: true
+      # Keep false so the browser app can boot before phone secrets are
+      # entered. Set true after SHARED_SECRET is configured to enforce phone
+      # auth, and optionally set FAIL_ON_MISSING_PHONE_SECRET=true to refuse
+      # startup when the secret is missing.
       - key: REQUIRE_PHONE_AUTH
         value: 'false'
       - key: FAIL_ON_MISSING_PHONE_SECRET
         value: 'false'
-      # Matches this service's default Render hostname, so the first deploy is one click.
-      # Override these if you use a custom domain or a different service name.
-      - key: PUBLIC_URL
-        value: https://casa-verde-voice-order-agent.onrender.com
-      - key: PHONE_BACKEND_URL
-        value: https://casa-verde-voice-order-agent.onrender.com
-      - key: PHONE_AGENT_ID
-        value: ''
-      # Optional Twilio phone bridge. Add values later in Render Environment settings.
+      # Optional Twilio phone bridge. TWILIO_AUTH_TOKEN is your Twilio account
+      # Auth Token (for webhook signature validation); add it later in Render
+      # Environment settings. The stream token is pre-generated.
       - key: TWILIO_AUTH_TOKEN
         value: ''
       - key: TWILIO_STREAM_SECRET
-        value: ''
+        generateValue: true
       # Optional real receipt delivery; otherwise /receipt returns a mock receipt.
       - key: RESEND_API_KEY
         value: ''
       - key: RECEIPT_FROM_EMAIL
+        value: ''
+      # Optional split deployment: comma-separated origins of a separately
+      # hosted frontend allowed to call this API cross-origin. Empty =
+      # same-origin only (the default single-service setup).
+      - key: ALLOWED_ORIGINS
         value: ''

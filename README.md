@@ -91,16 +91,30 @@ local `.env` file.
 The Render Blueprint defaults `REQUIRE_PHONE_AUTH` to `false`, so the browser app can
 boot before phone secrets are entered. If Render logs say
 `REQUIRE_PHONE_AUTH=true but SHARED_SECRET is missing`, that is now a warning rather
-than a crash; either add a private `SHARED_SECRET` to enable phone tools or set
+than a crash; either keep the pre-generated `SHARED_SECRET` to enable phone tools or set
 `REQUIRE_PHONE_AUTH=false` for a browser/manual-order deployment.
 
-Do not put the secret in `render.yaml` or the deploy URL.
+Do not put real secrets in `render.yaml` or the deploy URL — `render.yaml` only
+declares keys, and Render fills values from its secret store (with generated
+defaults for `SHARED_SECRET` and `TWILIO_STREAM_SECRET`).
 
 ## 3. Connect a phone number
 
-### Twilio media bridge included in this repository
+### Option A — AssemblyAI SIP telephony (recommended)
 
-Set these additional variables:
+Point a Twilio number at AssemblyAI over SIP so there is no media server to run:
+Twilio hands the call straight to AssemblyAI, and AssemblyAI runs the stored phone
+agent — including verified keypad (`dtmf_collected_arguments`) collection for the
+mock payment step. Follow the [AssemblyAI Twilio setup](https://www.assemblyai.com/docs/voice-agents/voice-agent-api/connect-to-twilio):
+create a SIP trunk terminating at `sip:sip.assemblyai.com`, attach your number,
+import the number with AssemblyAI, and bind it to the `PHONE_AGENT_ID` printed by
+the backend at startup. The agent's remote tools (`/menu`, `/order`, `/payment`,
+`/receipt`) still call this backend over HTTPS, so keep it deployed and reachable.
+
+### Option B — Twilio media bridge included in this repository
+
+Use this when you want the call audio to flow through your own server instead of
+AssemblyAI's SIP integration. Set these additional variables:
 
 ```bash
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
@@ -115,15 +129,13 @@ POST https://your-public-host.example.com/twilio/voice
 
 The webhook validates `X-Twilio-Signature`, returns TwiML with a bidirectional
 `<Connect><Stream>`, and bridges Twilio's 8 kHz μ-law audio to the AssemblyAI Voice
-Agent WebSocket. Caller DTMF events are forwarded as keypad input and are never
-written to logs. The phone agent must be published before the route becomes active.
-
-### AssemblyAI phone/SIP integration
-
-You can also use AssemblyAI's own phone/SIP number integration instead of the custom
-bridge. Attach the `PHONE_AGENT_ID` printed by the backend to the number/SIP trunk in
-the AssemblyAI dashboard. That route is useful when the AssemblyAI telephony product
-handles keypad collection directly.
+Agent WebSocket with zero resampling (the stored phone agent is published with
+`audio/pcmu` input/output formats). The Voice Agent WebSocket has no DTMF input
+event, so keypad tones reach AssemblyAI in-band with the forwarded audio; keypad
+digits are never logged. Verified keypad payment collection is only guaranteed on
+the SIP path (Option A) — treat payment over the media bridge as experimental and
+test it end to end before any demo. The phone agent must be published before the
+route becomes active.
 
 ## 4. Phone order flow
 
@@ -141,9 +153,11 @@ send_receipt
 ```
 
 `process_payment` exposes only `order_id` as a normal model argument. The sensitive
-fields are declared under `dtmf_collected_arguments` with `sensitive: true` in
-`server/phone-agent.json`. The agent is instructed never to ask callers to speak
-card digits aloud.
+fields are declared under `dtmf_collected_arguments` (array form, each entry with
+`parameter_name`, `min_digits`/`max_digits`, `sensitive: true`, `terminator: "#"`,
+and a spoken `prompt`) in `server/phone-agent.json`, matching the AssemblyAI DTMF
+tool schema. Each keypad entry ends with the hash key. The agent is instructed
+never to ask callers to speak card digits aloud.
 
 ## 5. Authenticated phone-tool API
 
@@ -177,8 +191,9 @@ total, and the payment status. The model cannot submit a charge amount.
 
 For the mock payment path, use a Luhn-valid test number such as
 `4111111111111111`, re-enter the same number, use a future `MMYY` expiry such as
-`1299`, and use authorization key `1234`. Use authorization key `0000` to simulate a
-decline. These values are for the mock only; no real payment is processed.
+`1299`, and use authorization key `1234` — pressing `#` after each keypad entry.
+Use authorization key `0000` to simulate a decline. These values are for the mock
+only; no real payment is processed.
 
 ## 6. Receipt delivery
 
@@ -222,17 +237,73 @@ launch still needs:
 - a verified AssemblyAI/Twilio telephony configuration and end-to-end DTMF tests;
 - a real email provider configuration if receipts must be delivered.
 
+## Integration troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Browser shows the scripted demo | No `ASSEMBLYAI_API_KEY`, or agent publish failed | Check backend logs for `Could not publish the browser agent`; verify the key and restart. |
+| `voice backend not running` on mic tap | `/api/token` returned 503/502 | Backend has no key or no published agent; AssemblyAI outage also returns 502. |
+| WebSocket closes immediately (code 1006) | Token expired or already used | Tokens are single-use with a 5-minute redemption window; the app fetches a fresh one per call — retry. |
+| `agent_id_not_first` in a phone session | `session.update` mixed `agent_id` with inline fields | The bridge sends `agent_id` alone (formats live on the stored agent); update to the current server code. |
+| Phone agent tools do nothing | Tool schema rejected at publish | Tools must use the `http: { url, http_method, headers: [{name, value}] }` shape; see `server/phone-agent.json`. |
+| Twilio webhook answers `Unauthorized` | Signature mismatch | `TWILIO_AUTH_TOKEN` must be the account Auth Token, and `PUBLIC_URL` must exactly match the configured webhook host. |
+| Twilio webhook answers `not configured` | Phone agent unpublished or URLs missing | Set `SHARED_SECRET` + public URL, restart, and confirm `phone_agent` in `/api/health`. |
+| Keypad payment never completes on the bridge | DTMF collection is SIP-path functionality | Use the AssemblyAI SIP integration (Option A) for verified keypad payment. |
+| Cold-call failure on Render free plan | Service slept; Twilio timed out the webhook | Wake the service before the call, or use a paid instance type. |
+
 ## Single-link deployment
 
-- **Full-stack deployment:** [Deploy the current branch to Render](https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09055-casa-verde-voice-order-agent). Render serves the UI and backend from one HTTPS origin. The Blueprint enables auto-deploy and pre-fills the default Render URL; enter only private secrets in Render's environment settings.
+- **Full-stack deployment:** [Deploy the current branch to Render](https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09119-casa-verde-voice-order-agent). One Render web service builds the React frontend and runs the Node backend on a single HTTPS origin (the frontend calls the API same-origin at `/api/*`, and Twilio/AssemblyAI webhooks share the same public URL). The Blueprint enables auto-deploy; the public URL is derived automatically from Render, and `SHARED_SECRET` / `TWILIO_STREAM_SECRET` are pre-generated — enter only `ASSEMBLYAI_API_KEY` plus any optional secrets in Render's environment settings.
 - **Browser-only demo:** [Open the GitHub Pages demo](https://elle31416.github.io/casa-verde-voice-order-agent/). It has no backend, phone tools, payment, or receipt delivery.
 
-For the full phone flow, add `SHARED_SECRET`, `TWILIO_AUTH_TOKEN`, and the optional receipt settings in Render's Environment page. If you use a custom domain or rename the service, update `PUBLIC_URL` and `PHONE_BACKEND_URL` before restarting so the phone agent is published.
+### Render environment reference
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `ASSEMBLYAI_API_KEY` | For live voice | AssemblyAI key; without it the site runs the scripted demo. |
+| `SHARED_SECRET` | For phone tools | Bearer secret for `/menu`, `/order`, `/payment`, `/receipt` (pre-generated). |
+| `REQUIRE_PHONE_AUTH` | No (`false`) | Set `true` once phone secrets are configured. |
+| `TWILIO_AUTH_TOKEN` | For the media bridge | Twilio account Auth Token for webhook signature validation. |
+| `TWILIO_STREAM_SECRET` | For the media bridge | Media WebSocket token (pre-generated; falls back to `SHARED_SECRET`). |
+| `PUBLIC_URL` / `PHONE_BACKEND_URL` | Only custom domains | Override the auto-derived Render URL. |
+| `RESEND_API_KEY` / `RECEIPT_FROM_EMAIL` | No | Real email receipts; otherwise mock receipts. |
+| `ALLOWED_ORIGINS` | Only split deploys | Comma-separated frontend origins allowed cross-origin. |
+
+After deploy, verify `https://<your-service>.onrender.com/api/health` reports
+`"mode": "live"` (or `"demo"` without a key) and the expected `public_url`.
+For the full phone flow, set `REQUIRE_PHONE_AUTH=true` after secrets exist, add
+`TWILIO_AUTH_TOKEN` for the media bridge (or bind `PHONE_AGENT_ID` via SIP), and
+restart. Notes:
+
+- Renaming the service or adding a custom domain needs no `render.yaml` change:
+  the server re-derives the public URL on restart. Set `PUBLIC_URL` explicitly
+  only if Render's external URL is not the URL callers/webhooks use.
+- The blueprint pins `branch: arena/01a09119-casa-verde-voice-order-agent`. After
+  merging to `main`, change the branch in the Render dashboard to `main`.
+- Render's free plan sleeps idle services; the first request (or Twilio webhook)
+  after sleep pays a cold start of up to ~a minute. Use a paid instance type for
+  reliable phone demos.
+
+### Split deployment (optional static frontend + API backend)
+
+The single-service blueprint above is recommended. If you prefer two Render
+services instead:
+
+1. Deploy this repo as a **Web Service** exactly as above (it still serves its
+   own copy of the UI, which is fine).
+2. Create a **Static Site** from the same repo with build command
+   `npm ci && VITE_API_BASE_URL=https://<your-api>.onrender.com npm run build`
+   and publish directory `dist`.
+3. On the backend service, set `ALLOWED_ORIGINS=https://<your-site>.onrender.com`
+   and redeploy.
+
+The static frontend then calls the backend cross-origin; same-origin single
+service behavior is unchanged when `VITE_API_BASE_URL` is unset.
 
 ## Static publishing
 
 GitHub Pages runs the browser UI in scripted-demo mode because it has no backend.
-The repository's Pages site must use the current Arena branch (`arena/01a09055-casa-verde-voice-order-agent`) with `/docs` if you want this PR's latest static build immediately. Alternatively, merge the PR into `main` and keep the existing `main` / `/docs` Pages source.
+The repository's Pages site must use the current Arena branch (`arena/01a09119-casa-verde-voice-order-agent`) with `/docs` if you want this branch's latest static build immediately. Alternatively, merge into `main` and keep the existing `main` / `/docs` Pages source (the `Deploy to GitHub Pages` workflow builds `dist/` with the project base path automatically).
 
 After frontend changes, refresh the committed static build:
 

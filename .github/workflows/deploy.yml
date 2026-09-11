@@ -24,7 +24,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
+      # GITHUB_PAGES=true builds with the /casa-verde-voice-order-agent/ base
+      # path the project site is served from.
       - run: npm run build
+        env:
+          GITHUB_PAGES: 'true'
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
