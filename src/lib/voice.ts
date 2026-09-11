@@ -6,6 +6,8 @@
  * PCM16 at 24 kHz, base64 inside JSON frames, both directions.
  */
 
+import { apiUrl } from './api'
+
 export type VoiceStatus =
   | 'idle'
   | 'connecting'
@@ -237,7 +239,7 @@ export function createVoiceSession(cb: VoiceCallbacks): VoiceSessionHandle {
       if (!navigator.mediaDevices?.getUserMedia) {
         return fail('this browser has no microphone support')
       }
-      const res = await fetch('/api/token')
+      const res = await fetch(apiUrl('/api/token'))
       if (!res.ok) {
         return fail(res.status === 503 ? 'voice backend not running' : 'token request failed')
       }
@@ -366,16 +368,23 @@ export function createVoiceSession(cb: VoiceCallbacks): VoiceSessionHandle {
   function stop() {
     stopping = true
     try {
+      // session.end stops billing immediately; just closing the socket leaves
+      // a billable 30-second resume window. Give the server a moment to reply
+      // with session.ended and close, then force-close as a fallback.
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'session.end' }))
     } catch {
       /* closing anyway */
     }
     window.setTimeout(() => {
-      ws?.close()
+      try {
+        ws?.close()
+      } catch {
+        /* already closed */
+      }
       ws = null
       teardown()
       cb.onStatus('idle')
-    }, 150)
+    }, 2000)
   }
 
   return { start, stop }

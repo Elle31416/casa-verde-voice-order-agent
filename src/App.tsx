@@ -7,6 +7,7 @@ import { MenuShowcase } from './components/MenuShowcase'
 import { Features } from './components/Features'
 import { Footer } from './components/Footer'
 import { MENU, MENU_MAP, TAX_RATE } from './data/menu'
+import { apiUrl } from './lib/api'
 import {
   makeDemoOrder,
   submitLiveOrder,
@@ -67,7 +68,7 @@ export default function App() {
 
   useEffect(() => {
     let alive = true
-    fetch('/api/health')
+    fetch(apiUrl('/api/health'))
       .then((response) => {
         if (!response.ok) return { ok: false, orders_available: false }
         return response.json() as Promise<{ ok: boolean; orders_available?: boolean }>

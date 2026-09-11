@@ -32,6 +32,8 @@ interface SubmitOrderResponse {
   error?: string
 }
 
+import { apiUrl } from './api'
+
 /** Submit a ticket to the restaurant backend without exposing any credentials. */
 export async function submitLiveOrder(
   items: OrderDraftItem[],
@@ -39,7 +41,7 @@ export async function submitLiveOrder(
 ): Promise<SubmittedOrder> {
   let response: Response
   try {
-    response = await fetch('/api/orders', {
+    response = await fetch(apiUrl('/api/orders'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

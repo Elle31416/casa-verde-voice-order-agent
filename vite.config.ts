@@ -16,10 +16,17 @@ const svgImportPlugin = () => ({
 });
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
-  // Absolute base only for production builds (GitHub Pages project site);
-  // dev server stays at "/" so it works behind any proxy port.
-  base: command === 'build' ? '/casa-verde-voice-order-agent/' : '/',
+//
+// Base path is "/" by default so the production build works when served from
+// the domain root (Render full-stack service, `npm run serve`, custom domains).
+// Set GITHUB_PAGES=true (or VITE_BASE) only for the GitHub Pages project site,
+// which lives under /casa-verde-voice-order-agent/.
+const base =
+  process.env.VITE_BASE ??
+  (process.env.GITHUB_PAGES === 'true' ? '/casa-verde-voice-order-agent/' : '/')
+
+export default defineConfig({
+  base,
   plugins: [
     react(),
     tailwindcss(),
@@ -55,4 +62,4 @@ export default defineConfig(({ command }) => ({
     port: 4173,
     allowedHosts: true as const,
   },
-}))
+})
