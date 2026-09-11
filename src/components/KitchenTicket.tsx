@@ -7,13 +7,14 @@ export interface TicketLine {
 
 interface KitchenTicketProps {
   order: Record<string, number>;
+  notes?: Record<string, string>;
   sentAt: string | null;
   onSend: () => void;
   onClear: () => void;
   onSetQty: (id: string, qty: number) => void;
 }
 
-export function KitchenTicket({ order, sentAt, onSend, onClear, onSetQty }: KitchenTicketProps) {
+export function KitchenTicket({ order, notes, sentAt, onSend, onClear, onSetQty }: KitchenTicketProps) {
   const lines: TicketLine[] = Object.entries(order)
     .map(([id, qty]) => ({ item: MENU_MAP.get(id)!, qty }))
     .filter((l) => l.item && l.qty > 0);
@@ -59,7 +60,12 @@ export function KitchenTicket({ order, sentAt, onSend, onClear, onSetQty }: Kitc
                 <span className="text-base leading-none" aria-hidden="true">{l.item.emoji}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-bold">{l.item.name}</span>
-                  <span className="block text-[10px] text-[#1c261e]/55">{usd(l.item.price)} each</span>
+                  <span className="block text-[10px] text-[#1c261e]/55">
+                    {usd(l.item.price)} each
+                    {notes?.[l.item.id] ? (
+                      <span className="font-bold text-[#015c2c]"> · {notes[l.item.id]}</span>
+                    ) : null}
+                  </span>
                 </span>
                 {!sent && (
                   <span className="flex items-center gap-1.5">

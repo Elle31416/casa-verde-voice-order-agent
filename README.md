@@ -1,62 +1,72 @@
 # Casa Verde · Voice Order Agent
 
-Frontend for **Casa Verde**, a demo restaurant whose AI host *Verde* takes orders
-out loud. Guests talk naturally (English, español, or Spanglish); Verde transcribes
-the conversation, builds the kitchen ticket live — quantities, swaps, and modifiers
-included — and sends it to expo.
+A restaurant frontend with a **real AI voice host**, powered by the
+[AssemblyAI Voice Agent API](https://www.assemblyai.com/docs/voice-agents/voice-agent-api).
+Guests talk to *Verde* out loud; Verde hears the order, calls client-side tools,
+and every add, swap, and modifier lands on the kitchen ticket live.
 
-Built with **React 18 + TypeScript + Vite 7 + Tailwind CSS v4**. No backend needed:
-the voice session is a faithful client-side simulation, so the whole experience runs
-as a static site.
+- **React 18 + TypeScript + Tailwind v4** frontend, **dependency-free Node 18+** backend
+- 🎙️ Real-time voice: mic → `wss://agents.assemblyai.com/v1/ws` (24 kHz PCM16),
+  agent audio back through a gapless playback ring; barge-in interrupts cleanly
+- 🧾 Tool-calling: `get_menu`, `update_order`, `send_order` are client-side
+  function tools — the browser answers `tool.call` events, so the order state
+  never round-trips through a server
+- 🔑 **The API key lives only on the backend.** The page fetches a 60-second
+  token from `GET /api/token`; the key is never sent to the browser
+- 🈯 Graceful fallback: no backend or no key → an automatically-served scripted
+  demo plays in the same UI (`/api/health` decides the mode)
 
-## Highlights
+## Layout
 
-- 🎙️ **Simulated live voice session** — word-by-word transcript playback with a
-  listening mic, animated equalizer, and session timer.
-- 🧾 **Live kitchen ticket** — every spoken item, swap, and removal updates the
-  receipt instantly; add items by hand from the menu and the same ticket syncs.
-- 🌮 **Tonight’s menu** — filterable by course, stepper controls, "guest favorite"
-  badges, and running subtotal + tax.
-- 📤 **Send to kitchen** — closes the order with a ready-in time and a new-ticket
-  reset.
+```
+server/index.mjs     backend: publishes/updates the agent, mints tokens, serves dist/
+server/agent.json    the agent definition (prompt, voice, client-side tools) — safe to commit
+src/                 React app (see src/components/*)
+.env                 ASSEMBLYAI_API_KEY lives here — gitignored, never committed
+.env.example         template
+render.yaml          one-click deploy blueprint
+```
 
-## Run it locally
+## Run locally
 
 ```bash
+cp .env.example .env        # put your real ASSEMBLYAI_API_KEY in it
 npm install
-npm run dev      # dev server on http://localhost:5173
-npm run build    # static production build in dist/
-npm run preview  # serve the production build
+npm run dev                 # UI on :5173 (proxies /api to the backend)
+npm run start               # backend on :8787 — publishes the agent + mints tokens
+# live full-stack mode: npm run serve   (builds, then serves UI + API on one port)
 ```
 
-## Deploying to GitHub Pages
+Chrome/Edge are the reliable mic targets. The first `npm run start` creates the
+“Casa Verde · Voice Host” agent in your AssemblyAI account and stores its id as
+`AGENT_ID` in `.env`; later runs update it in place.
 
-A ready-made workflow lives at `.github/workflows/deploy.yml`
-(build with `npm ci && npm run build`, deploy with `actions/deploy-pages`).
-It publishes on every push to `main`, or on demand via **Actions →
-Deploy to GitHub Pages → Run workflow**. Two one-time repo settings are
-required (Settings → Pages):
+## Security notes
 
-1. **Sources → GitHub Actions** (this enables Pages for the workflow)
-2. Settings → Actions → General → allow workflows if Actions is disabled
+- `.env` is gitignored; only `.env.example` is committed.
+- To also make the key available to GitHub Actions (e.g. for CI that publishes
+  the agent), repo owners run:
+  `gh secret set ASSEMBLYAI_API_KEY` — a bot without repo-admin rights cannot.
+- If a key was ever pasted into a chat or ticket, **rotate it** at
+  https://www.assemblyai.com/dashboard/api-keys.
 
-The production build uses base path `/casa-verde-voice-order-agent/` automatically
-(configured in `vite.config.ts`); the dev server stays at `/`.
+## Publishing
 
-## Project layout
+**Render (recommended — full stack, real live voice):** click-through Blueprint
+deploy; it asks for `ASSEMBLYAI_API_KEY` and nothing else:
 
-```
-src/
-  App.tsx                  page composition + shared order state
-  components/
-    Header.tsx / Hero.tsx  nav, headline, live stats
-    VoiceSession.tsx       scripted transcript player (mic UI, EQ, timer)
-    KitchenTicket.tsx      live receipt: lines, totals, send-to-kitchen
-    MenuShowcase.tsx       category-filtered menu with tap-to-add steppers
-    Features.tsx           "how it works" cards
-    Footer.tsx / Logo.tsx
-  data/menu.ts             menu items, prices, tax rate
-  lib/demo.ts              scripted voice-session turns (dialog + ticket deltas)
-```
+👉 https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent
 
-> Demo project — no microphone access, no real orders, and nothing is cooked.
+(Anyone with the URL can then start sessions billed to that key — Render's
+free plan is a good fit for demos.)
+
+**GitHub Pages (static — scripted demo only, no tokens/mic):** `.github/workflows/deploy.yml`
+builds the site and deploys via `actions/deploy-pages` on every push to `main`.
+The repo owner must enable it once: *Settings → Pages → Source: GitHub Actions*
+(and allow workflows under *Settings → Actions*). The static build
+automatically runs in scripted-demo mode because no backend answers `/api/health`.
+
+The production build uses base path `/casa-verde-voice-order-agent/` for Pages;
+the Node server serves the same `dist/` at `/` on Render.
+
+> Demo project — Casa Verde is fictional; orders go nowhere and nothing is cooked.

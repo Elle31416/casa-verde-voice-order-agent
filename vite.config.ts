@@ -41,6 +41,14 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     allowedHosts: true as const,
     hmr: false,
+    // The Node backend (see server/index.mjs) holds the AssemblyAI key and
+    // mints short-lived tokens; the browser talks to it same-origin.
+    proxy: {
+      '/api': {
+        target: process.env.API_TARGET || 'http://localhost:8787',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     host: '0.0.0.0',

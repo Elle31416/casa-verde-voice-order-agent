@@ -4,7 +4,7 @@ const STATS = [
   { value: '38', label: 'languages understood' },
 ];
 
-export function Hero() {
+export function Hero({ mode = 'checking' }: { mode?: 'checking' | 'live' | 'demo' }) {
   return (
     <section id="top" className="relative overflow-hidden">
       {/* ambient glows */}
@@ -23,7 +23,9 @@ export function Hero() {
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-lima/70" />
             <span className="relative inline-flex size-2 rounded-full bg-lima" />
           </span>
-          Verde is online · tonight’s menu loaded
+          {mode === 'live'
+            ? 'Verde is live — real voice agent, powered by AssemblyAI'
+            : 'Verde is online · tonight’s menu loaded'}
         </p>
 
         <h1
