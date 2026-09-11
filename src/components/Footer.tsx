@@ -8,8 +8,8 @@ export function Footer() {
 
         <p className="max-w-md text-xs leading-relaxed text-faint">
           Live calls run through AssemblyAI’s Voice Agent API with a token minted by the backend —
-          your API key never reaches the browser. Without a backend, this page plays a scripted
-          simulation instead. Either way, no orders are actually cooked.
+          your API key never reaches the browser. A connected backend accepts live tickets and
+          returns a kitchen ticket; without one, this page stays a scripted simulation.
         </p>
         <div className="flex items-center gap-6 text-xs font-medium text-muted">
           <a href="#demo" className="transition hover:text-ink">Live demo</a>

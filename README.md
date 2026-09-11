@@ -3,23 +3,29 @@
 A restaurant frontend with a **real AI voice host**, powered by the
 [AssemblyAI Voice Agent API](https://www.assemblyai.com/docs/voice-agents/voice-agent-api).
 Guests talk to *Verde* out loud; Verde hears the order, calls client-side tools,
-and every add, swap, and modifier lands on the kitchen ticket live.
+and every add, swap, and modifier lands on the kitchen ticket live. When the guest
+sends the ticket, the browser posts the validated order to the backend's live intake
+API and gets back a real ticket id, ETA, and server-calculated total.
 
 - **React 18 + TypeScript + Tailwind v4** frontend, **dependency-free Node 18+** backend
 - 🎙️ Real-time voice: mic → `wss://agents.assemblyai.com/v1/ws` (24 kHz PCM16),
   agent audio back through a gapless playback ring; barge-in interrupts cleanly
-- 🧾 Tool-calling: `get_menu`, `update_order`, `send_order` are client-side
-  function tools — the browser answers `tool.call` events, so the order state
-  never round-trips through a server
+- 🧾 Tool-calling: `get_menu`, `update_order`, and `send_order` are client-side
+  function tools — the browser answers `tool.call` events so the ticket updates
+  instantly; `send_order` then posts the final ticket to the kitchen API
 - 🔑 **The API key lives only on the backend.** The page fetches a 60-second
   token from `GET /api/token`; the key is never sent to the browser
-- 🈯 Graceful fallback: no backend or no key → an automatically-served scripted
-  demo plays in the same UI (`/api/health` decides the mode)
+- 🧾 Live order intake: `POST /api/orders` validates menu ids and quantities, prices
+  the ticket server-side, and returns a kitchen ticket; `GET /api/orders/:ticket_id`
+  reads it back while the process is running
+- 🈯 Graceful fallback: no backend → an automatically-served scripted demo plays in
+  the same UI (`/api/health` decides the voice mode); a backend without an
+  AssemblyAI key can still accept manual live tickets
 
 ## Layout
 
 ```
-server/index.mjs     backend: publishes/updates the agent, mints tokens, serves dist/
+server/index.mjs     backend: publishes/updates the agent, mints tokens, accepts live orders, serves dist/
 server/agent.json    the agent definition (prompt, voice, client-side tools) — safe to commit
 src/                 React app (see src/components/*)
 .env                 ASSEMBLYAI_API_KEY lives here — gitignored, never committed
@@ -33,7 +39,7 @@ render.yaml          one-click deploy blueprint
 cp .env.example .env        # put your real ASSEMBLYAI_API_KEY in it
 npm install
 npm run dev                 # UI on :5173 (proxies /api to the backend)
-npm run start               # backend on :8787 — publishes the agent + mints tokens
+npm run start               # backend on :8787 — voice tokens + live order intake
 # live full-stack mode: npm run serve   (builds, then serves UI + API on one port)
 ```
 
@@ -82,4 +88,4 @@ Then remove `docs/` (or keep it as a fallback) and every push to `main` deploys 
 The production build uses base path `/casa-verde-voice-order-agent/` for Pages;
 the Node server serves the same `dist/` at `/` on Render.
 
-> Demo project — Casa Verde is fictional; orders go nowhere and nothing is cooked.
+> Demo project — Casa Verde is fictional. With the Node backend running, live tickets are accepted by an in-memory kitchen queue (they are cleared when the process restarts); no real restaurant fulfills them.

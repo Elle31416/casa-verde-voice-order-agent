@@ -4,9 +4,10 @@ import { CATEGORIES, MENU, usd, type MenuCategory } from '../data/menu';
 interface MenuShowcaseProps {
   order: Record<string, number>;
   onSetQty: (id: string, qty: number) => void;
+  locked?: boolean;
 }
 
-export function MenuShowcase({ order, onSetQty }: MenuShowcaseProps) {
+export function MenuShowcase({ order, onSetQty, locked = false }: MenuShowcaseProps) {
   const [cat, setCat] = useState<MenuCategory | 'all'>('all');
   const items = cat === 'all' ? MENU : MENU.filter((m) => m.category === cat);
 
@@ -18,7 +19,9 @@ export function MenuShowcase({ order, onSetQty }: MenuShowcaseProps) {
             Tonight’s menu
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Tap to build the ticket by hand — or let Verde listen instead.
+            {locked
+              ? 'This ticket is in the kitchen queue. Start a new order above to add more.'
+              : 'Tap to build the ticket by hand — or let Verde listen instead.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Menu categories">
@@ -79,7 +82,8 @@ export function MenuShowcase({ order, onSetQty }: MenuShowcaseProps) {
                   <button
                     type="button"
                     onClick={() => onSetQty(item.id, 1)}
-                    className="rounded-full border border-verde-400/40 px-3.5 py-1.5 text-[11px] font-bold text-verde-300 transition hover:bg-verde-400 hover:text-verde-950"
+                    disabled={locked}
+                    className="rounded-full border border-verde-400/40 px-3.5 py-1.5 text-[11px] font-bold text-verde-300 transition hover:bg-verde-400 hover:text-verde-950 disabled:cursor-not-allowed disabled:opacity-40"
                     aria-label={`Add ${item.name} to the order`}
                   >
                     + Add
@@ -89,7 +93,8 @@ export function MenuShowcase({ order, onSetQty }: MenuShowcaseProps) {
                     <button
                       type="button"
                       onClick={() => onSetQty(item.id, qty - 1)}
-                      className="flex size-7 items-center justify-center rounded-full border border-white/15 text-sm transition hover:border-verde-400/60 hover:text-verde-300"
+                      disabled={locked}
+                      className="flex size-7 items-center justify-center rounded-full border border-white/15 text-sm transition hover:border-verde-400/60 hover:text-verde-300 disabled:cursor-not-allowed disabled:opacity-40"
                       aria-label={`Remove one ${item.name}`}
                     >
                       −
@@ -97,7 +102,8 @@ export function MenuShowcase({ order, onSetQty }: MenuShowcaseProps) {
                     <button
                       type="button"
                       onClick={() => onSetQty(item.id, qty + 1)}
-                      className="flex size-7 items-center justify-center rounded-full bg-verde-400 text-sm font-bold text-verde-950 transition hover:bg-verde-300"
+                      disabled={locked}
+                      className="flex size-7 items-center justify-center rounded-full bg-verde-400 text-sm font-bold text-verde-950 transition hover:bg-verde-300 disabled:cursor-not-allowed disabled:opacity-40"
                       aria-label={`Add one more ${item.name}`}
                     >
                       +
