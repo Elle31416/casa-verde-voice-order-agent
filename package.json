@@ -9,6 +9,9 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "start": "node server/index.mjs",
+    "phone": "node scripts/connect-phone.mjs",
+    "phone:status": "node scripts/connect-phone.mjs --status",
+    "test": "node scripts/test-telephony.mjs",
     "serve": "npm run build && node server/index.mjs",
     "deploy:docs": "GITHUB_PAGES=true vite build && rm -rf docs && cp -r dist docs && touch docs/.nojekyll"
   },
@@ -32,5 +35,5 @@
     "vite": "^7.2.4",
     "vite-plugin-svgr": "^4.5.0"
   },
-  "description": "Casa Verde — a voice AI host that takes restaurant orders and builds the kitchen ticket live."
+  "description": "Casa Verde — a voice AI host that takes restaurant orders and builds the kitchen ticket live, in the browser and on a Twilio SIP phone number."
 }
