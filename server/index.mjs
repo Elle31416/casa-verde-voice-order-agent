@@ -2,52 +2,44 @@
 // Casa Verde backend.
 //
 // Browser mode keeps the API key on this server, mints short-lived AssemblyAI
-// tokens, and serves the React app. Phone mode adds authenticated HTTP tools for
-// a stored AssemblyAI agent plus an optional Twilio bidirectional media bridge.
+// tokens, and serves the React app. Phone mode runs the AssemblyAI Voice Agent
+// API telephony architecture:
+//
+//   Caller → Twilio number → SIP trunk → sip:sip.assemblyai.com → stored agent
+//                                                                  │
+//   this backend ← HTTP tools (/menu /order /payment /receipt) ────┘
+//
+// Twilio carries the call to AssemblyAI over SIP, so there is no media server
+// to run; server/telephony.mjs provisions the trunk and binds the agent, and
+// this server only answers the agent's HTTP tools. An optional Twilio media
+// bridge (/twilio/voice + /twilio/media) remains for a number that cannot use
+// SIP trunking.
+//
 // The payment and receipt paths are explicitly mock/demo paths; they are not a
 // payment processor and are not PCI-compliant.
 
 import http from 'node:http'
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
-import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
+import { ROOT, configuredSecret, loadEnv, maskSecret, validPublicUrl } from './env.mjs'
+import { AGENTS_API_BASE, agentRequest, ensureAgent, hydratePhoneAgent } from './agents.mjs'
+import {
+  TelephonyError,
+  connectPhone,
+  telephonyConfig,
+  telephonyDiagnosis,
+  telephonyIssues,
+  telephonyStatus,
+  twilioIssues,
+} from './telephony.mjs'
 
-const ROOT = resolve(fileURLToPath(import.meta.url), '../..')
 const DIST = join(ROOT, 'dist')
-const ENV_FILE = join(ROOT, '.env')
 const PORT = Number(process.env.PORT) || 8787
 const HOST = '0.0.0.0'
-const API_BASE = process.env.AGENTS_API_BASE || 'https://agents.assemblyai.com/v1'
 
 // --- .env (gitignored; never served, never logged) --------------------------
-
-function loadEnv() {
-  if (!existsSync(ENV_FILE)) return
-  for (const line of readFileSync(ENV_FILE, 'utf8').split('\n')) {
-    if (/^\s*(#|$)/.test(line)) continue
-    const match = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/)
-    if (!match) continue
-    if (!(match[1] in process.env)) process.env[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2')
-  }
-}
-
-function saveEnv(key, value) {
-  process.env[key] = value
-  let text = ''
-  try {
-    text = readFileSync(ENV_FILE, 'utf8')
-  } catch {}
-  const line = `${key}=${value}`
-  const re = new RegExp(`^[ \\t]*${key}[ \\t]*=.*$`, 'm')
-  const next = re.test(text)
-    ? text.replace(re, line)
-    : (text && !text.endsWith('\n') ? `${text}\n` : text) + `${line}\n`
-  try {
-    writeFileSync(ENV_FILE, next)
-  } catch {}
-}
 
 loadEnv()
 
@@ -64,14 +56,36 @@ const RENDER_PUBLIC_URL = (
 ).replace(/\/$/, '')
 const PUBLIC_URL = (process.env.PUBLIC_URL || RENDER_PUBLIC_URL).replace(/\/$/, '')
 const PHONE_BACKEND_URL = (process.env.PHONE_BACKEND_URL || PUBLIC_URL).replace(/\/$/, '')
-// Twilio credentials for the phone bridge. TWILIO_VOICE_AGENT_ID is the Twilio
-// API Key SID (SK...) for the voice agent; TWILIO_API_SECRET is its secret.
-// Together they are the HTTP Basic auth pair for every REST call this server
-// makes to Twilio — including the lookup that resolves the webhook signing key.
+// Voice Agent API credentials for publishing agents and minting browser tokens.
+const AGENT_API = { apiKey: API_KEY, base: process.env.AGENTS_API_BASE || AGENTS_API_BASE }
+// The AssemblyAI SIP telephony credentials: account SID + Auth Token, the
+// number you already own, and the SIP trunk domain you invent. This is the
+// recommended phone transport — see server/telephony.mjs.
+const TELEPHONY = telephonyConfig()
+// TWILIO_ISSUES covers the four Twilio values; TELEPHONY_ISSUES adds the
+// AssemblyAI key the agent itself needs.
+const TWILIO_ISSUES = twilioIssues(TELEPHONY)
+const TELEPHONY_ISSUES = telephonyIssues(TELEPHONY)
+const PHONE_AUTO_CONNECT = process.env.PHONE_AUTO_CONNECT === 'true'
+// Legacy bridge credentials, used only by the optional /twilio/voice transport:
+// TWILIO_VOICE_AGENT_ID is a Twilio API Key SID (SK…) and TWILIO_API_SECRET is
+// its secret. When the account Auth Token is configured directly, the bridge
+// uses that for webhook signature verification and no lookup is needed.
 const TWILIO_VOICE_AGENT_ID = process.env.TWILIO_VOICE_AGENT_ID || ''
 const TWILIO_API_SECRET = process.env.TWILIO_API_SECRET || ''
-const TWILIO_API_BASE = process.env.TWILIO_API_BASE || 'https://api.twilio.com'
+const TWILIO_API_BASE = TELEPHONY.coreApi
 const TWILIO_STREAM_SECRET = process.env.TWILIO_STREAM_SECRET || SHARED_SECRET
+const TWILIO_ACCOUNT_READY = configuredSecret(TELEPHONY.accountSid) && configuredSecret(TELEPHONY.authToken)
+const TWILIO_APIKEY_READY = configuredSecret(TWILIO_VOICE_AGENT_ID) && configuredSecret(TWILIO_API_SECRET)
+// 'sip' is the Voice Agent API transport: Twilio hands the call to AssemblyAI
+// and the agent is published with the default audio encoding. 'bridge' keeps
+// the audio on this server, which needs audio/pcmu pinned on the agent, so the
+// published agent follows whichever transport is actually available.
+const PHONE_TRANSPORT = process.env.PHONE_TRANSPORT === 'bridge'
+  ? 'bridge'
+  : (TWILIO_ISSUES.length === 0
+    ? 'sip'
+    : ((TWILIO_ACCOUNT_READY || TWILIO_APIKEY_READY) && configuredSecret(TWILIO_STREAM_SECRET) ? 'bridge' : 'auto'))
 const RESEND_API_KEY = process.env.RESEND_API_KEY || ''
 const RECEIPT_FROM_EMAIL = process.env.RECEIPT_FROM_EMAIL || ''
 // Optional split deployment: comma-separated origins allowed to call the API
@@ -81,19 +95,6 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter(Boolean)
 const BUILD_SHA = process.env.RENDER_GIT_COMMIT || process.env.GIT_SHA || ''
-
-function configuredSecret(value) {
-  return Boolean(value && !String(value).includes('replace_with_') && !String(value).includes('your_'))
-}
-
-function validPublicUrl(value) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !value.includes('YOUR_BACKEND_URL')
-  } catch {
-    return false
-  }
-}
 
 const AGENT_DEF = JSON.parse(readFileSync(join(ROOT, 'server/agent.json'), 'utf8'))
 const PHONE_AGENT_TEMPLATE = JSON.parse(readFileSync(join(ROOT, 'server/phone-agent.json'), 'utf8'))
@@ -539,80 +540,17 @@ async function sendReceipt(payload) {
   }
 }
 
-// --- AssemblyAI agent publishing --------------------------------------------
-
-async function aai(path, { method = 'GET', body } = {}) {
-  const response = await fetch(API_BASE + path, {
-    method,
-    signal: AbortSignal.timeout(15000),
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  })
-  const text = await response.text()
-  // Do not include upstream response bodies in logs: providers can echo request
-  // details, and error payloads should never become a secret-leak channel.
-  if (!response.ok) throw new Error(`${method} ${path} -> ${response.status}`)
-  return text ? JSON.parse(text) : {}
-}
-
-function agentListOf(payload) {
-  if (Array.isArray(payload)) return payload
-  if (Array.isArray(payload?.agents)) return payload.agents
-  if (Array.isArray(payload?.data)) return payload.data
-  return []
-}
-
-function hydratePhoneAgent() {
-  const replace = (value) => {
-    if (typeof value === 'string') {
-      return value
-        .replaceAll('https://YOUR_BACKEND_URL', () => PHONE_BACKEND_URL)
-        .replaceAll('REPLACE_WITH_SHARED_SECRET', () => SHARED_SECRET)
-    }
-    if (Array.isArray(value)) return value.map(replace)
-    if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replace(item)]))
-    }
-    return value
-  }
-  return replace(PHONE_AGENT_TEMPLATE)
-}
-
-async function ensureAgent(definition, envKey) {
-  if (process.env[envKey]) {
-    const id = process.env[envKey]
-    try {
-      await aai(`/agents/${id}`, { method: 'PUT', body: definition })
-      return { id, name: definition.name }
-    } catch (error) {
-      // A pinned id can go stale (agent deleted in the dashboard). Fall
-      // through to the name lookup so startup heals instead of wedging.
-      console.warn(`Stored ${envKey}=${id} could not be updated (${error.message}); re-creating by name.`)
-      delete process.env[envKey]
-    }
-  }
-  const list = await aai('/agents')
-  const existing = agentListOf(list).find((item) => item && item.name === definition.name)
-  if (existing) {
-    await aai(`/agents/${existing.id}`, { method: 'PUT', body: definition })
-    saveEnv(envKey, existing.id)
-    return { id: existing.id, name: definition.name }
-  }
-  const created = await aai('/agents', { method: 'POST', body: definition })
-  const id = created.id ?? created.agent?.id
-  if (!id) throw new Error('agent create returned no id')
-  saveEnv(envKey, id)
-  return { id, name: definition.name }
-}
+// --- Voice Agent API publishing ---------------------------------------------
+//
+// One stored agent per front door, both referenced by id. The browser app
+// connects with a short-lived token; the phone number is bound to the phone
+// agent id by server/telephony.mjs.
 
 let agent = null
 let phoneAgent = null
 if (API_KEY) {
   try {
-    agent = await ensureAgent(AGENT_DEF, 'AGENT_ID')
+    agent = await ensureAgent(AGENT_API, AGENT_DEF, { idEnvKey: 'AGENT_ID' })
     console.log(`Agent ready: ${agent.id} ("${agent.name}")`)
   } catch (error) {
     console.error(`Could not publish the browser agent: ${error.message}`)
@@ -621,8 +559,14 @@ if (API_KEY) {
 
   if (validPublicUrl(PHONE_BACKEND_URL) && configuredSecret(SHARED_SECRET)) {
     try {
-      phoneAgent = await ensureAgent(hydratePhoneAgent(), 'PHONE_AGENT_ID')
-      console.log(`Phone agent ready: ${phoneAgent.id} ("${phoneAgent.name}")`)
+      phoneAgent = await ensureAgent(AGENT_API, hydratePhoneAgent(PHONE_AGENT_TEMPLATE, {
+        backendUrl: PHONE_BACKEND_URL,
+        secret: SHARED_SECRET,
+        // Only the media bridge streams 8 kHz μ-law through this server. On
+        // the SIP transport AssemblyAI carries the audio itself.
+        pcmu: PHONE_TRANSPORT === 'bridge',
+      }), { idEnvKey: 'PHONE_AGENT_ID' })
+      console.log(`Phone agent ready: ${phoneAgent.id} ("${phoneAgent.name}", transport=${PHONE_TRANSPORT})`)
     } catch (error) {
       console.error(`Could not publish the phone agent: ${error.message}`)
       console.error('Phone ordering will be unavailable until this is fixed.')
@@ -634,17 +578,62 @@ if (API_KEY) {
   console.log('No ASSEMBLYAI_API_KEY — browser voice is in demo mode; authenticated order/payment tools remain available when configured.')
 }
 
+// --- AssemblyAI SIP telephony ------------------------------------------------
+//
+// The number is attached to a Twilio SIP trunk whose origination URL is
+// sip:sip.assemblyai.com, so calls never touch this server's audio path.
+// Provisioning is idempotent and is run by `npm run phone`; PHONE_AUTO_CONNECT
+// repeats it at startup for a deployment that cannot run the CLI.
+
+let telephonyReport = null
+let telephonyError = ''
+
+async function provisionTelephony(log = (line) => console.log(line)) {
+  if (!phoneAgent) throw new TelephonyError('publish the phone agent before connecting a number')
+  const issues = telephonyIssues(TELEPHONY)
+  if (issues.length) throw new TelephonyError(`telephony is not configured: ${issues.join('; ')}`)
+  telephonyError = ''
+  const report = await connectPhone(TELEPHONY, { agentId: phoneAgent.id, log })
+  telephonyReport = report
+  return report
+}
+
+if (phoneAgent && PHONE_AUTO_CONNECT) {
+  if (TELEPHONY_ISSUES.length) {
+    console.warn(`Skipping SIP telephony setup: ${TELEPHONY_ISSUES.join('; ')}`)
+  } else {
+    try {
+      const report = await provisionTelephony()
+      console.log(`SIP telephony ready: ${report.phone_number} → ${report.trunk_domain} → agent ${report.agent_id}`)
+    } catch (error) {
+      telephonyError = error.message
+      console.error(`SIP telephony setup failed: ${error.message}`)
+      console.error('Call routing is unchanged; fix the issue above and re-run npm run phone.')
+    }
+  }
+}
+
 // --- Twilio request and media bridge ----------------------------------------
 
 function twilioCredentialsConfigured() {
+  return twilioAccountConfigured() || twilioApiKeyConfigured()
+}
+
+/** Account SID + Auth Token: the pair the Voice Agent API telephony setup uses. */
+function twilioAccountConfigured() {
+  return configuredSecret(TELEPHONY.accountSid) && configuredSecret(TELEPHONY.authToken)
+}
+
+/** Legacy API Key SID (SK…) + secret, used by the media-bridge transport only. */
+function twilioApiKeyConfigured() {
   return configuredSecret(TWILIO_VOICE_AGENT_ID) && configuredSecret(TWILIO_API_SECRET)
 }
 
-// Twilio signs every webhook with the *account* Auth Token, and an API key
-// secret is explicitly not accepted as that signing key. The voice agent
-// credentials therefore authenticate a REST lookup that reads the Auth Token
-// for the account Twilio names in the webhook params (AccountSid), which is
-// then cached per account for the life of the process.
+// Twilio signs every webhook with the *account* Auth Token. When that token is
+// configured directly there is nothing to look up; otherwise the API key pair
+// authenticates a REST lookup that reads the Auth Token for the account Twilio
+// names in the webhook params (AccountSid), cached per account for the life of
+// the process.
 const twilioSigningKeys = new Map()
 const twilioLookups = new Map()
 const twilioRefreshedAt = new Map()
@@ -655,7 +644,8 @@ const TWILIO_REFRESH_COOLDOWN_MS = 60_000
 const TWILIO_MAX_KNOWN_ACCOUNTS = 25
 
 async function twilioSigningKey(accountSid, { refresh = false } = {}) {
-  if (!twilioCredentialsConfigured()) return ''
+  if (twilioAccountConfigured()) return TELEPHONY.authToken
+  if (!twilioApiKeyConfigured()) return ''
   const key = accountSid || '__owner__'
   if (refresh) {
     const last = twilioRefreshedAt.get(key) || 0
@@ -908,14 +898,37 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (path === '/api/health') {
+    const bridgeReady = Boolean(
+      phoneAgent && twilioCredentialsConfigured() && validPublicUrl(PUBLIC_URL) && configuredSecret(TWILIO_STREAM_SECRET),
+    )
+    const sipReady = Boolean(phoneAgent && TELEPHONY_ISSUES.length === 0)
     return json(res, 200, {
       ok: Boolean(API_KEY && agent),
       mode: API_KEY && agent ? 'live' : 'demo',
       service: 'casa-verde-voice-order-agent',
       ...(BUILD_SHA ? { build_sha: BUILD_SHA.slice(0, 12) } : {}),
       orders_available: true,
-      phone_enabled: Boolean(phoneAgent && twilioCredentialsConfigured() && validPublicUrl(PUBLIC_URL) && configuredSecret(TWILIO_STREAM_SECRET)),
+      phone_enabled: sipReady || bridgeReady,
       phone_configured: Boolean(phoneAgent),
+      // The Voice Agent API telephony path: Twilio → SIP trunk → AssemblyAI.
+      // Credentials are reported masked or not at all.
+      telephony: {
+        transport: PHONE_TRANSPORT,
+        configured: sipReady,
+        issues: TELEPHONY_ISSUES,
+        number: TELEPHONY.phoneNumber || null,
+        account: TELEPHONY.accountSid ? maskSecret(TELEPHONY.accountSid) : null,
+        trunk_domain: TELEPHONY.trunkDomain || null,
+        trunk_sid: telephonyReport?.trunk_sid ?? null,
+        agent_id: phoneAgent?.id ?? null,
+        connected: Boolean(telephonyReport),
+        ...(telephonyError ? { error: telephonyError } : {}),
+      },
+      // The optional media-bridge transport, for a number that cannot use SIP.
+      media_bridge: {
+        enabled: bridgeReady,
+        webhook: bridgeReady && validPublicUrl(PUBLIC_URL) ? `${PUBLIC_URL}/twilio/voice` : null,
+      },
       public_url: validPublicUrl(PUBLIC_URL) ? PUBLIC_URL : undefined,
       receipt_delivery: RESEND_API_KEY && RECEIPT_FROM_EMAIL ? 'email' : 'mock',
       agent,
@@ -930,7 +943,7 @@ const server = http.createServer(async (req, res) => {
       // GET /v1/token only takes expires_in_seconds (token redemption window;
       // generous so mic-permission prompts cannot outlast it) and the optional
       // session-duration cap. There is no `product` parameter.
-      const data = await aai('/token?expires_in_seconds=300&max_session_duration_seconds=3600')
+      const data = await agentRequest(AGENT_API, '/token?expires_in_seconds=300&max_session_duration_seconds=3600')
       if (!data?.token) throw new Error('token response had no token')
       return json(res, 200, { token: data.token, agent_id: agent.id })
     } catch {
@@ -956,6 +969,33 @@ const server = http.createServer(async (req, res) => {
     return order
       ? json(res, 200, { ok: true, order: orderSummary(order) })
       : json(res, 404, { ok: false, error: 'ticket not found' })
+  }
+
+  // Operator routes for the SIP transport. Both spend the Twilio and
+  // AssemblyAI credentials on the caller's behalf, so both require the shared
+  // bearer secret; neither returns a credential.
+  if (path === '/api/phone/status' && req.method === 'GET') {
+    if (!requireRemoteAuth(req, res)) return
+    try {
+      const status = await telephonyStatus(TELEPHONY, { agentId: phoneAgent?.id })
+      return json(res, 200, { ok: true, ...status, diagnosis: telephonyDiagnosis(status) })
+    } catch {
+      return json(res, 502, { ok: false, error: 'telephony status could not be read' })
+    }
+  }
+
+  if (path === '/api/phone/connect' && req.method === 'POST') {
+    if (!requireRemoteAuth(req, res)) return
+    try {
+      const report = await provisionTelephony((line) => console.log(`[telephony] ${line}`))
+      return json(res, 200, { ok: true, ...report })
+    } catch (error) {
+      const upstream = error instanceof TelephonyError && error.status >= 500
+      return json(res, upstream ? 502 : 400, {
+        ok: false,
+        error: error instanceof TelephonyError ? error.message : 'telephony could not be connected',
+      })
+    }
   }
 
   // These four authenticated routes are the remote tools used by the phone agent.
@@ -995,6 +1035,8 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // The media-bridge transport. A number that is attached to a SIP trunk never
+  // reaches this webhook: the trunk controls the call. See server/telephony.mjs.
   if (path === '/twilio/voice' && (req.method === 'POST' || req.method === 'GET')) {
     if (!phoneAgent || !validPublicUrl(PUBLIC_URL) || !twilioCredentialsConfigured() || !configuredSecret(TWILIO_STREAM_SECRET)) {
       return xml(res, 503, '<Response><Say>Phone ordering is not configured.</Say><Hangup /></Response>')
@@ -1072,10 +1114,20 @@ server.on('upgrade', (req, socket, head) => {
 server.listen(PORT, HOST, () => {
   console.log(`Casa Verde is up: http://localhost:${PORT}`)
   if (validPublicUrl(PUBLIC_URL)) console.log(`Public URL: ${PUBLIC_URL}`)
-  if (phoneAgent && validPublicUrl(PUBLIC_URL)) console.log(`Phone webhook: ${PUBLIC_URL}/twilio/voice`)
+  if (phoneAgent && TELEPHONY_ISSUES.length === 0) {
+    console.log(`SIP telephony: ${TELEPHONY.phoneNumber} → ${TELEPHONY.trunkDomain} → agent ${phoneAgent.id}`)
+    console.log(
+      telephonyReport
+        ? 'SIP telephony: trunk provisioned — calls to that number reach this agent.'
+        : 'SIP telephony: run `npm run phone` (or POST /api/phone/connect) to create the trunk and bind the agent.',
+    )
+  } else if (phoneAgent) {
+    console.log(`SIP telephony: not configured — ${TELEPHONY_ISSUES.join('; ')}`)
+  }
+  if (phoneAgent && validPublicUrl(PUBLIC_URL)) console.log(`Media bridge webhook: ${PUBLIC_URL}/twilio/voice`)
   console.log(
     twilioCredentialsConfigured()
-      ? `Twilio media bridge: configured with voice agent id ${TWILIO_VOICE_AGENT_ID}`
-      : 'Twilio media bridge: disabled — set TWILIO_VOICE_AGENT_ID and TWILIO_API_SECRET.',
+      ? `Twilio media bridge: configured (${twilioAccountConfigured() ? 'account SID + Auth Token' : `API key ${maskSecret(TWILIO_VOICE_AGENT_ID)}`})`
+      : 'Twilio media bridge: disabled — set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN (or TWILIO_VOICE_AGENT_ID and TWILIO_API_SECRET).',
   )
 })

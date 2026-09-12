@@ -40,11 +40,32 @@ services:
         value: 'false'
       - key: FAIL_ON_MISSING_PHONE_SECRET
         value: 'false'
-      # Optional Twilio phone bridge. TWILIO_VOICE_AGENT_ID is the Twilio API
-      # Key SID (SK...) for the voice agent and TWILIO_API_SECRET is its
-      # secret; enter both in Render Environment settings — the secret must
-      # never be committed to the repository. The stream token is
-      # pre-generated.
+      # Phone transport A (recommended): AssemblyAI SIP telephony.
+      #   Caller -> Twilio number -> SIP trunk -> sip:sip.assemblyai.com -> agent
+      # Enter all four in Render Environment settings; none of them belong in
+      # the repository. After the first deploy, run `npm run phone` locally
+      # against the same values, or POST /api/phone/connect (bearer
+      # SHARED_SECRET) to provision the trunk from the deployed service.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: TWILIO_TRUNK_DOMAIN
+        sync: false
+      # Set true to re-run the idempotent trunk/number/agent provisioning on
+      # every start instead of calling /api/phone/connect by hand.
+      - key: PHONE_AUTO_CONNECT
+        value: 'false'
+      # 'sip' (default) or 'bridge'. The bridge keeps call audio on this
+      # server and is only needed for a number that cannot use SIP trunking.
+      - key: PHONE_TRANSPORT
+        value: ''
+      # Phone transport B (fallback): Twilio media bridge. TWILIO_VOICE_AGENT_ID
+      # is a Twilio API Key SID (SK...) and TWILIO_API_SECRET is its secret; the
+      # account Auth Token above is preferred, since that is what signs inbound
+      # webhooks. The stream token is pre-generated.
       - key: TWILIO_VOICE_AGENT_ID
         sync: false
       - key: TWILIO_API_SECRET
