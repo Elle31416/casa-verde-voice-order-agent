@@ -82,7 +82,7 @@ await test('connectPhone provisions trunk, origination, number, import and bindi
   assert.equal(state.origination[report.trunk_sid][0].sip_url, ASSEMBLYAI_SIP_URL)
   assert.equal(state.origination[report.trunk_sid][0].enabled, true)
   assert.equal(state.numbers[0].trunk_sid, report.trunk_sid)
-  assert.deepEqual(state.imported, { phone_number: NUMBER, termination_uri: TRUNK_DOMAIN })
+  assert.deepEqual(state.registry[NUMBER], { termination_uri: TRUNK_DOMAIN, agent_id: AGENT_ID })
   assert.equal(state.boundAgent, AGENT_ID)
   assert.ok(lines.length >= 6, 'every step should log a line')
   assert.ok(!lines.join('\n').includes(AUTH_TOKEN), 'the auth token must not be logged')

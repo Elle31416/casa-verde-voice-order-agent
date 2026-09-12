@@ -105,27 +105,29 @@ export function createApi(state) {
       return send(res, 200, agent)
     }
 
-    // AssemblyAI: phone numbers.
-    const encoded = encodeURIComponent(NUMBER)
+    // AssemblyAI: phone numbers. Keyed by whatever number is in the path, so
+    // the stand-in works for any account, not just the fixture one.
     if (path === '/v1/phone-numbers/import' && req.method === 'POST') {
       bump('import-number')
       assert.ok(req.headers['idempotency-key'], 'import must send an Idempotency-Key header')
-      state.imported = { ...jsonBody }
+      state.registry[jsonBody.phone_number] = { termination_uri: jsonBody.termination_uri, agent_id: null }
       return send(res, 201, { phone_number: jsonBody.phone_number, type: 'imported' })
     }
-    if (path === `/v1/phone-numbers/${encoded}/agent` && req.method === 'PUT') {
-      bump('bind-agent')
-      state.boundAgent = jsonBody.agent_id
-      return send(res, 200, { phone_number: NUMBER, agent_id: jsonBody.agent_id, type: 'imported' })
-    }
-    if (path === `/v1/phone-numbers/${encoded}` && req.method === 'GET') {
-      if (!state.imported) return send(res, 404, { detail: 'Not found' })
-      return send(res, 200, {
-        phone_number: NUMBER,
-        agent_id: state.boundAgent ?? null,
-        type: 'imported',
-        termination_uri: state.imported.termination_uri,
-      })
+    const numberMatch = path.match(/^\/v1\/phone-numbers\/([^/]+)(\/agent)?$/)
+    if (numberMatch) {
+      const wanted = decodeURIComponent(numberMatch[1])
+      const record = state.registry[wanted]
+      if (numberMatch[2] && req.method === 'PUT') {
+        bump('bind-agent')
+        if (!record) return send(res, 404, { detail: 'phone_number_not_registered' })
+        record.agent_id = jsonBody.agent_id
+        state.boundAgent = jsonBody.agent_id
+        return send(res, 200, { phone_number: wanted, agent_id: record.agent_id, type: 'imported' })
+      }
+      if (!numberMatch[2] && req.method === 'GET') {
+        if (!record) return send(res, 404, { detail: 'Not found' })
+        return send(res, 200, { phone_number: wanted, agent_id: record.agent_id, type: 'imported', termination_uri: record.termination_uri })
+      }
     }
 
     return send(res, 404, { detail: `unmocked ${req.method} ${path}` })
@@ -140,7 +142,7 @@ export const newState = (seed = {}) => ({
   trunks: [],
   origination: {},
   takenDomains: [],
-  imported: null,
+  registry: {},
   boundAgent: null,
   agents: [],
   ...seed,
