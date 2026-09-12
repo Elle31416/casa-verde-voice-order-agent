@@ -40,11 +40,15 @@ services:
         value: 'false'
       - key: FAIL_ON_MISSING_PHONE_SECRET
         value: 'false'
-      # Optional Twilio phone bridge. TWILIO_AUTH_TOKEN is your Twilio account
-      # Auth Token (for webhook signature validation); add it later in Render
-      # Environment settings. The stream token is pre-generated.
-      - key: TWILIO_AUTH_TOKEN
-        value: ''
+      # Optional Twilio phone bridge. TWILIO_VOICE_AGENT_ID is the Twilio API
+      # Key SID (SK...) for the voice agent and TWILIO_API_SECRET is its
+      # secret; enter both in Render Environment settings — the secret must
+      # never be committed to the repository. The stream token is
+      # pre-generated.
+      - key: TWILIO_VOICE_AGENT_ID
+        sync: false
+      - key: TWILIO_API_SECRET
+        sync: false
       - key: TWILIO_STREAM_SECRET
         generateValue: true
       # Optional real receipt delivery; otherwise /receipt returns a mock receipt.

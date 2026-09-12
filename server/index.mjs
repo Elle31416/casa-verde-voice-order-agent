@@ -64,7 +64,13 @@ const RENDER_PUBLIC_URL = (
 ).replace(/\/$/, '')
 const PUBLIC_URL = (process.env.PUBLIC_URL || RENDER_PUBLIC_URL).replace(/\/$/, '')
 const PHONE_BACKEND_URL = (process.env.PHONE_BACKEND_URL || PUBLIC_URL).replace(/\/$/, '')
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || ''
+// Twilio credentials for the phone bridge. TWILIO_VOICE_AGENT_ID is the Twilio
+// API Key SID (SK...) for the voice agent; TWILIO_API_SECRET is its secret.
+// Together they are the HTTP Basic auth pair for every REST call this server
+// makes to Twilio — including the lookup that resolves the webhook signing key.
+const TWILIO_VOICE_AGENT_ID = process.env.TWILIO_VOICE_AGENT_ID || ''
+const TWILIO_API_SECRET = process.env.TWILIO_API_SECRET || ''
+const TWILIO_API_BASE = process.env.TWILIO_API_BASE || 'https://api.twilio.com'
 const TWILIO_STREAM_SECRET = process.env.TWILIO_STREAM_SECRET || SHARED_SECRET
 const RESEND_API_KEY = process.env.RESEND_API_KEY || ''
 const RECEIPT_FROM_EMAIL = process.env.RECEIPT_FROM_EMAIL || ''
@@ -630,8 +636,76 @@ if (API_KEY) {
 
 // --- Twilio request and media bridge ----------------------------------------
 
-function twilioSignatureValid(req, params) {
-  if (!configuredSecret(TWILIO_AUTH_TOKEN) || !validPublicUrl(PUBLIC_URL)) return false
+function twilioCredentialsConfigured() {
+  return configuredSecret(TWILIO_VOICE_AGENT_ID) && configuredSecret(TWILIO_API_SECRET)
+}
+
+// Twilio signs every webhook with the *account* Auth Token, and an API key
+// secret is explicitly not accepted as that signing key. The voice agent
+// credentials therefore authenticate a REST lookup that reads the Auth Token
+// for the account Twilio names in the webhook params (AccountSid), which is
+// then cached per account for the life of the process.
+const twilioSigningKeys = new Map()
+const twilioLookups = new Map()
+const twilioRefreshedAt = new Map()
+// A forged webhook must not be able to make this server hammer Twilio's API, so
+// a cached signing key is re-fetched at most once per minute per account, and
+// only a bounded number of distinct accounts are ever resolved.
+const TWILIO_REFRESH_COOLDOWN_MS = 60_000
+const TWILIO_MAX_KNOWN_ACCOUNTS = 25
+
+async function twilioSigningKey(accountSid, { refresh = false } = {}) {
+  if (!twilioCredentialsConfigured()) return ''
+  const key = accountSid || '__owner__'
+  if (refresh) {
+    const last = twilioRefreshedAt.get(key) || 0
+    if (Date.now() - last < TWILIO_REFRESH_COOLDOWN_MS) return twilioSigningKeys.get(key) || ''
+    twilioSigningKeys.delete(key)
+    twilioLookups.delete(key)
+  }
+  if (twilioSigningKeys.has(key)) return twilioSigningKeys.get(key)
+  // Collapse concurrent webhook hits for one account into a single lookup.
+  if (twilioLookups.has(key)) return twilioLookups.get(key)
+  if (!refresh && twilioSigningKeys.size + twilioLookups.size >= TWILIO_MAX_KNOWN_ACCOUNTS) return ''
+
+  const lookup = (async () => {
+    const path = accountSid
+      ? `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}.json`
+      : '/2010-04-01/Accounts.json?PageSize=1'
+    const response = await fetch(TWILIO_API_BASE + path, {
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${TWILIO_VOICE_AGENT_ID}:${TWILIO_API_SECRET}`).toString('base64')}`,
+        Accept: 'application/json',
+      },
+    })
+    const text = await response.text()
+    // Never log this response body: the Account resource carries the Auth Token.
+    if (!response.ok) throw new Error(`GET ${path} -> ${response.status}`)
+    const data = JSON.parse(text)
+    const token = data.auth_token || data.accounts?.[0]?.auth_token || ''
+    if (!token) throw new Error(`GET ${path} returned no auth_token`)
+    return token
+  })()
+
+  twilioLookups.set(key, lookup)
+  if (refresh) twilioRefreshedAt.set(key, Date.now())
+  try {
+    const token = await lookup
+    twilioSigningKeys.set(key, token)
+    return token
+  } finally {
+    twilioLookups.delete(key)
+  }
+}
+
+function twilioSignatureFor(signedUrl, params, signingKey) {
+  const data = signedUrl + Object.keys(params).sort().map((name) => name + params[name]).join('')
+  return createHmac('sha1', signingKey).update(data).digest('base64')
+}
+
+async function twilioSignatureValid(req, params) {
+  if (!twilioCredentialsConfigured() || !validPublicUrl(PUBLIC_URL)) return false
   const signature = req.headers['x-twilio-signature']
   if (typeof signature !== 'string' || !signature) return false
   // Twilio signs the exact configured webhook URL, query string included, plus
@@ -639,9 +713,22 @@ function twilioSignatureValid(req, params) {
   // the parameters already live in the query string, so params must be empty.
   const url = new URL(req.url, `${PUBLIC_URL}/`)
   const signedUrl = `${PUBLIC_URL}${url.pathname}${url.search}`
-  const data = signedUrl + Object.keys(params).sort().map((key) => key + params[key]).join('')
-  const expected = createHmac('sha1', TWILIO_AUTH_TOKEN).update(data).digest('base64')
-  return sameSecret(signature, expected)
+  const accountSid = typeof params.AccountSid === 'string' && params.AccountSid ? params.AccountSid : ''
+
+  // Two passes: the cached signing key first, then one refresh, so a rotated
+  // Auth Token in the Twilio console self-heals without a restart.
+  for (const refresh of [false, true]) {
+    let signingKey
+    try {
+      signingKey = await twilioSigningKey(accountSid, { refresh })
+    } catch (error) {
+      console.error(`Could not resolve the Twilio signing key for ${accountSid || 'the configured account'}: ${error.message}`)
+      return false
+    }
+    if (!signingKey) return false
+    if (sameSecret(signature, twilioSignatureFor(signedUrl, params, signingKey))) return true
+  }
+  return false
 }
 
 function twilioStreamTokenValid(value) {
@@ -827,7 +914,7 @@ const server = http.createServer(async (req, res) => {
       service: 'casa-verde-voice-order-agent',
       ...(BUILD_SHA ? { build_sha: BUILD_SHA.slice(0, 12) } : {}),
       orders_available: true,
-      phone_enabled: Boolean(phoneAgent && configuredSecret(TWILIO_AUTH_TOKEN) && validPublicUrl(PUBLIC_URL) && configuredSecret(TWILIO_STREAM_SECRET)),
+      phone_enabled: Boolean(phoneAgent && twilioCredentialsConfigured() && validPublicUrl(PUBLIC_URL) && configuredSecret(TWILIO_STREAM_SECRET)),
       phone_configured: Boolean(phoneAgent),
       public_url: validPublicUrl(PUBLIC_URL) ? PUBLIC_URL : undefined,
       receipt_delivery: RESEND_API_KEY && RECEIPT_FROM_EMAIL ? 'email' : 'mock',
@@ -909,14 +996,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (path === '/twilio/voice' && (req.method === 'POST' || req.method === 'GET')) {
-    if (!phoneAgent || !validPublicUrl(PUBLIC_URL) || !configuredSecret(TWILIO_AUTH_TOKEN) || !configuredSecret(TWILIO_STREAM_SECRET)) {
+    if (!phoneAgent || !validPublicUrl(PUBLIC_URL) || !twilioCredentialsConfigured() || !configuredSecret(TWILIO_STREAM_SECRET)) {
       return xml(res, 503, '<Response><Say>Phone ordering is not configured.</Say><Hangup /></Response>')
     }
     try {
       // GET requests carry their parameters in the query string, which is
       // already part of the signed URL, so only POST bodies become params.
       const params = req.method === 'POST' ? await readForm(req) : {}
-      if (!twilioSignatureValid(req, params)) return xml(res, 403, '<Response><Say>Unauthorized.</Say><Hangup /></Response>')
+      if (!(await twilioSignatureValid(req, params))) return xml(res, 403, '<Response><Say>Unauthorized.</Say><Hangup /></Response>')
       return xml(res, 200, twilioVoiceXml())
     } catch {
       return xml(res, 400, '<Response><Say>Unable to start this call.</Say><Hangup /></Response>')
@@ -986,4 +1073,9 @@ server.listen(PORT, HOST, () => {
   console.log(`Casa Verde is up: http://localhost:${PORT}`)
   if (validPublicUrl(PUBLIC_URL)) console.log(`Public URL: ${PUBLIC_URL}`)
   if (phoneAgent && validPublicUrl(PUBLIC_URL)) console.log(`Phone webhook: ${PUBLIC_URL}/twilio/voice`)
+  console.log(
+    twilioCredentialsConfigured()
+      ? `Twilio media bridge: configured with voice agent id ${TWILIO_VOICE_AGENT_ID}`
+      : 'Twilio media bridge: disabled — set TWILIO_VOICE_AGENT_ID and TWILIO_API_SECRET.',
+  )
 })

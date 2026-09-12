@@ -32,9 +32,12 @@ public backend URL are configured. The browser agent can still run independently
 - The browser bundle never receives the AssemblyAI key, Twilio secrets, Resend key, or
   shared tool secret. The server mints short-lived AssemblyAI tokens and signs Twilio
   webhooks server-side.
-- The included Twilio bridge uses `TWILIO_AUTH_TOKEN` to verify inbound webhook
-  signatures; it does not need a Twilio REST API key pair because it does not make
-  outbound Twilio REST requests. Do not add API key secrets to source files.
+- The included Twilio bridge authenticates to Twilio with `TWILIO_VOICE_AGENT_ID`
+  (the API Key SID, `SK…`) and `TWILIO_API_SECRET`. Twilio signs inbound webhooks
+  with the *account* Auth Token and never with an API key secret, so the server
+  spends those credentials on a Twilio REST call that reads the Auth Token, caches
+  it, and verifies `X-Twilio-Signature` with it. Do not add either value to source
+  files.
 - Any AssemblyAI or Twilio credential pasted into chat, a ticket, a terminal log, or
   a repository should be revoked and replaced.
 
@@ -117,9 +120,17 @@ Use this when you want the call audio to flow through your own server instead of
 AssemblyAI's SIP integration. Set these additional variables:
 
 ```bash
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
+# Twilio API Key SID for the voice agent (SK…) and that key's secret.
+TWILIO_VOICE_AGENT_ID=your_twilio_voice_agent_id
+TWILIO_API_SECRET=your_twilio_api_secret
 TWILIO_STREAM_SECRET=another_long_random_value
 ```
+
+`TWILIO_VOICE_AGENT_ID` + `TWILIO_API_SECRET` are used as HTTP Basic auth to
+`https://api.twilio.com`, which is how the bridge resolves the account Auth Token
+that signs inbound webhooks. Give the API key read access to Accounts so that
+lookup succeeds; if it is scoped more tightly the webhook logs
+`Could not resolve the Twilio signing key` and answers `Unauthorized`.
 
 Configure the Twilio phone number's **Voice webhook** as:
 
@@ -222,7 +233,7 @@ receipt as sent.
 | Receipt requires payment | `/receipt` rejects orders where `paid !== true`. |
 | Payment tool stays quiet | `process_payment` uses `execution_mode: "hold"` and a 90-second timeout. |
 | Errors do not expose internals | Unexpected failures become short generic JSON errors; card values are never included. |
-| Twilio webhook authentication | `/twilio/voice` validates `X-Twilio-Signature`; the media WebSocket requires a separate stream token. |
+| Twilio webhook authentication | `/twilio/voice` validates `X-Twilio-Signature` against the account Auth Token resolved from the voice agent credentials; the media WebSocket requires a separate stream token. |
 
 ## PCI and production limitations
 
@@ -246,8 +257,8 @@ launch still needs:
 | WebSocket closes immediately (code 1006) | Token expired or already used | Tokens are single-use with a 5-minute redemption window; the app fetches a fresh one per call — retry. |
 | `agent_id_not_first` in a phone session | `session.update` mixed `agent_id` with inline fields | The bridge sends `agent_id` alone (formats live on the stored agent); update to the current server code. |
 | Phone agent tools do nothing | Tool schema rejected at publish | Tools must use the `http: { url, http_method, headers: [{name, value}] }` shape; see `server/phone-agent.json`. |
-| Twilio webhook answers `Unauthorized` | Signature mismatch | `TWILIO_AUTH_TOKEN` must be the account Auth Token, and `PUBLIC_URL` must exactly match the configured webhook host. |
-| Twilio webhook answers `not configured` | Phone agent unpublished or URLs missing | Set `SHARED_SECRET` + public URL, restart, and confirm `phone_agent` in `/api/health`. |
+| Twilio webhook answers `Unauthorized` | Signature mismatch, or the signing-key lookup failed | `TWILIO_VOICE_AGENT_ID` + `TWILIO_API_SECRET` must be a valid API key pair with Accounts read access, and `PUBLIC_URL` must exactly match the configured webhook host. Check the server log for `Could not resolve the Twilio signing key`. |
+| Twilio webhook answers `not configured` | Phone agent unpublished, credentials missing, or URLs missing | Set `SHARED_SECRET`, `TWILIO_VOICE_AGENT_ID`, `TWILIO_API_SECRET` and a public URL, restart, and confirm `phone_agent` / `phone_enabled` in `/api/health`. |
 | Keypad payment never completes on the bridge | DTMF collection is SIP-path functionality | Use the AssemblyAI SIP integration (Option A) for verified keypad payment. |
 | Cold-call failure on Render free plan | Service slept; Twilio timed out the webhook | Wake the service before the call, or use a paid instance type. |
 
@@ -263,7 +274,8 @@ launch still needs:
 | `ASSEMBLYAI_API_KEY` | For live voice | AssemblyAI key; without it the site runs the scripted demo. |
 | `SHARED_SECRET` | For phone tools | Bearer secret for `/menu`, `/order`, `/payment`, `/receipt` (pre-generated). |
 | `REQUIRE_PHONE_AUTH` | No (`false`) | Set `true` once phone secrets are configured. |
-| `TWILIO_AUTH_TOKEN` | For the media bridge | Twilio account Auth Token for webhook signature validation. |
+| `TWILIO_VOICE_AGENT_ID` | For the media bridge | Twilio API Key SID (`SK…`) for the voice agent; authenticates the lookup that resolves the webhook signing key. |
+| `TWILIO_API_SECRET` | For the media bridge | Secret for that API key. Enter it in Render's Environment settings — never commit it. |
 | `TWILIO_STREAM_SECRET` | For the media bridge | Media WebSocket token (pre-generated; falls back to `SHARED_SECRET`). |
 | `PUBLIC_URL` / `PHONE_BACKEND_URL` | Only custom domains | Override the auto-derived Render URL. |
 | `RESEND_API_KEY` / `RECEIPT_FROM_EMAIL` | No | Real email receipts; otherwise mock receipts. |
@@ -272,7 +284,7 @@ launch still needs:
 After deploy, verify `https://<your-service>.onrender.com/api/health` reports
 `"mode": "live"` (or `"demo"` without a key) and the expected `public_url`.
 For the full phone flow, set `REQUIRE_PHONE_AUTH=true` after secrets exist, add
-`TWILIO_AUTH_TOKEN` for the media bridge (or bind `PHONE_AGENT_ID` via SIP), and
+`TWILIO_VOICE_AGENT_ID` + `TWILIO_API_SECRET` for the media bridge (or bind `PHONE_AGENT_ID` via SIP), and
 restart. Notes:
 
 - Renaming the service or adding a custom domain needs no `render.yaml` change:
