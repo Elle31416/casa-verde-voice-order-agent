@@ -13,7 +13,7 @@ services:
     name: casa-verde-voice-order-agent
     runtime: node
     plan: free
-    branch: arena/01a093ca-casa-verde-voice-order-agent
+    branch: main
     buildCommand: npm ci && npm run typecheck && npm run test && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
