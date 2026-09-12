@@ -1,8 +1,8 @@
 // Publishing and resolving Voice Agent API agents.
 //
-// Both front doors (the browser app and the Twilio SIP phone number) run the
-// same stored agent, referenced by id. This module is the only place that
-// talks to https://agents.assemblyai.com/v1/agents.
+// The browser app connects to a stored agent by id, so its prompt, voice, and
+// tools are defined once here rather than inline per session. This module is
+// the only place that talks to https://agents.assemblyai.com/v1/agents.
 //
 // https://www.assemblyai.com/docs/voice-agents/voice-agent-api/manage-agents
 
@@ -51,35 +51,6 @@ export function agentListOf(payload) {
   if (Array.isArray(payload?.agents)) return payload.agents
   if (Array.isArray(payload?.data)) return payload.data
   return []
-}
-
-/**
- * Fills the phone-agent template with this deployment's tool URLs and bearer
- * secret. The template ships with placeholders so it stays safe to commit.
- *
- * `pcmu` pins the audio encoding for the Twilio media-bridge transport, which
- * streams 8 kHz μ-law in both directions. The SIP transport negotiates audio
- * itself, so the AssemblyAI default is left alone there.
- */
-export function hydratePhoneAgent(template, { backendUrl, secret, pcmu = false }) {
-  const replace = (value) => {
-    if (typeof value === 'string') {
-      return value
-        .replaceAll('https://YOUR_BACKEND_URL', () => backendUrl)
-        .replaceAll('REPLACE_WITH_SHARED_SECRET', () => secret)
-    }
-    if (Array.isArray(value)) return value.map(replace)
-    if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replace(item)]))
-    }
-    return value
-  }
-  const agent = replace(template)
-  if (pcmu) {
-    agent.input = { ...(agent.input || {}), format: { encoding: 'audio/pcmu' } }
-    agent.output = { ...(agent.output || {}), format: { encoding: 'audio/pcmu' } }
-  }
-  return agent
 }
 
 /**

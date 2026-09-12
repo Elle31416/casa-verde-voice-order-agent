@@ -1,9 +1,10 @@
 /**
  * Live voice session against AssemblyAI's Voice Agent API.
  *
- * The page never sees the API key: it asks the backend for a 60-second token
- * and connects straight to wss://agents.assemblyai.com/v1/ws. Audio is mono
- * PCM16 at 24 kHz, base64 inside JSON frames, both directions.
+ * The page never sees the API key: it asks the backend for a short-lived token
+ * (300s redemption window) and connects straight to
+ * wss://agents.assemblyai.com/v1/ws. Audio is mono PCM16 at 24 kHz, base64
+ * inside JSON frames, both directions.
  */
 
 import { apiUrl } from './api'
