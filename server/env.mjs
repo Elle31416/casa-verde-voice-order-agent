@@ -55,17 +55,6 @@ export function saveEnv(key, value, path = envFile()) {
   }
 }
 
-/**
- * True when a value is present and is not one of the shipped placeholders.
- * Placeholder detection is what lets `.env.example` be copied verbatim without
- * the server mistaking `your_twilio_auth_token` for a credential.
- */
-export function configuredSecret(value) {
-  if (!value) return false
-  const text = String(value)
-  return !text.includes('replace_with_') && !text.includes('your_') && !text.includes('REPLACE_WITH_')
-}
-
 /** True when the value is an absolute https URL that is not a placeholder. */
 export function validPublicUrl(value) {
   try {
@@ -74,15 +63,4 @@ export function validPublicUrl(value) {
   } catch {
     return false
   }
-}
-
-/**
- * Masks a credential for logs and status payloads: enough of each end to tell
- * two keys apart, never enough to reconstruct one.
- */
-export function maskSecret(value, head = 4, tail = 4) {
-  const text = String(value || '')
-  if (!text) return ''
-  if (text.length <= head + tail) return `${'*'.repeat(text.length)}`
-  return `${text.slice(0, head)}${'*'.repeat(Math.min(8, text.length - head - tail))}${text.slice(-tail)}`
 }

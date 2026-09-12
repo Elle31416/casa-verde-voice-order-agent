@@ -1,81 +1,36 @@
 # One-click full-stack deploy (frontend + backend on one Render web service):
-# https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a093ca-casa-verde-voice-order-agent
+# https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent
 #
-# The backend (server/index.mjs) holds secrets, serves the built React app from
-# dist/, mints AssemblyAI tokens, exposes the authenticated phone-agent tools,
-# and runs the optional Twilio media bridge. PUBLIC_URL is derived automatically
-# from Render's RENDER_EXTERNAL_URL, so no URL configuration is needed unless
-# you use a custom domain (then set PUBLIC_URL in the dashboard).
+# The backend (server/index.mjs) holds the AssemblyAI key, publishes the stored
+# agent, mints short-lived browser tokens, accepts kitchen tickets, and serves
+# the built React app from dist/. The browser talks to AssemblyAI directly over
+# WebSocket, so there is no media server or telephony to configure.
+#
+# PUBLIC_URL is derived automatically from Render's RENDER_EXTERNAL_URL, so no
+# URL configuration is needed unless you use a custom domain.
 services:
   - type: web
     name: casa-verde-voice-order-agent
     runtime: node
     plan: free
     branch: arena/01a093ca-casa-verde-voice-order-agent
-    buildCommand: npm ci && npm run typecheck && npm run build
+    buildCommand: npm ci && npm run typecheck && npm run test && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health
     autoDeployTrigger: commit
     envVars:
-      # AssemblyAI key. Without it the site runs in scripted-demo mode and the
-      # manual order API still works.
+      # The only required credential. Without it the site runs in scripted-demo
+      # mode and the manual order API still works.
       - key: ASSEMBLYAI_API_KEY
         sync: false
-      # Pinned agent ids. Leave empty: the server creates/updates agents by
-      # name on startup. Visible here so they can be pinned or rotated.
+      # Pinned agent id. Leave empty: the server creates/updates the agent by
+      # name on startup. Visible here so it can be pinned or rotated.
       - key: AGENT_ID
         value: ''
-      - key: PHONE_AGENT_ID
+      # Token lifetime (both optional; defaults 300 and 3600).
+      - key: TOKEN_EXPIRES_IN_SECONDS
         value: ''
-      # Authenticates the phone-agent remote tools (/menu, /order, /payment,
-      # /receipt). Render pre-generates a value; accept it or set your own.
-      - key: SHARED_SECRET
-        sync: false
-        generateValue: true
-      # Keep false so the browser app can boot before phone secrets are
-      # entered. Set true after SHARED_SECRET is configured to enforce phone
-      # auth, and optionally set FAIL_ON_MISSING_PHONE_SECRET=true to refuse
-      # startup when the secret is missing.
-      - key: REQUIRE_PHONE_AUTH
-        value: 'false'
-      - key: FAIL_ON_MISSING_PHONE_SECRET
-        value: 'false'
-      # Phone transport A (recommended): AssemblyAI SIP telephony.
-      #   Caller -> Twilio number -> SIP trunk -> sip:sip.assemblyai.com -> agent
-      # Enter all four in Render Environment settings; none of them belong in
-      # the repository. After the first deploy, run `npm run phone` locally
-      # against the same values, or POST /api/phone/connect (bearer
-      # SHARED_SECRET) to provision the trunk from the deployed service.
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_PHONE_NUMBER
-        sync: false
-      - key: TWILIO_TRUNK_DOMAIN
-        sync: false
-      # Set true to re-run the idempotent trunk/number/agent provisioning on
-      # every start instead of calling /api/phone/connect by hand.
-      - key: PHONE_AUTO_CONNECT
-        value: 'false'
-      # 'sip' (default) or 'bridge'. The bridge keeps call audio on this
-      # server and is only needed for a number that cannot use SIP trunking.
-      - key: PHONE_TRANSPORT
-        value: ''
-      # Phone transport B (fallback): Twilio media bridge. TWILIO_VOICE_AGENT_ID
-      # is a Twilio API Key SID (SK...) and TWILIO_API_SECRET is its secret; the
-      # account Auth Token above is preferred, since that is what signs inbound
-      # webhooks. The stream token is pre-generated.
-      - key: TWILIO_VOICE_AGENT_ID
-        sync: false
-      - key: TWILIO_API_SECRET
-        sync: false
-      - key: TWILIO_STREAM_SECRET
-        generateValue: true
-      # Optional real receipt delivery; otherwise /receipt returns a mock receipt.
-      - key: RESEND_API_KEY
-        value: ''
-      - key: RECEIPT_FROM_EMAIL
+      - key: MAX_SESSION_DURATION_SECONDS
         value: ''
       # Optional split deployment: comma-separated origins of a separately
       # hosted frontend allowed to call this API cross-origin. Empty =
