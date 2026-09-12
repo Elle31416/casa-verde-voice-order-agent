@@ -1,5 +1,5 @@
 # One-click full-stack deploy (frontend + backend on one Render web service):
-# https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09119-casa-verde-voice-order-agent
+# https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a093ca-casa-verde-voice-order-agent
 #
 # The backend (server/index.mjs) holds secrets, serves the built React app from
 # dist/, mints AssemblyAI tokens, exposes the authenticated phone-agent tools,
@@ -11,7 +11,7 @@ services:
     name: casa-verde-voice-order-agent
     runtime: node
     plan: free
-    branch: arena/01a09119-casa-verde-voice-order-agent
+    branch: arena/01a093ca-casa-verde-voice-order-agent
     buildCommand: npm ci && npm run typecheck && npm run build
     startCommand: node server/index.mjs
     healthCheckPath: /api/health

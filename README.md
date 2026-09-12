@@ -342,7 +342,7 @@ launch still needs:
 
 ## Single-link deployment
 
-- **Full-stack deployment:** [Deploy the current branch to Render](https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a09119-casa-verde-voice-order-agent). One Render web service builds the React frontend and runs the Node backend on a single HTTPS origin (the frontend calls the API same-origin at `/api/*`, and Twilio/AssemblyAI webhooks share the same public URL). The Blueprint enables auto-deploy; the public URL is derived automatically from Render, and `SHARED_SECRET` / `TWILIO_STREAM_SECRET` are pre-generated — enter only `ASSEMBLYAI_API_KEY` plus any optional secrets in Render's environment settings.
+- **Full-stack deployment:** [Deploy the current branch to Render](https://dashboard.render.com/blueprint/new?repo=https://github.com/Elle31416/casa-verde-voice-order-agent&branch=arena%2F01a093ca-casa-verde-voice-order-agent). One Render web service builds the React frontend and runs the Node backend on a single HTTPS origin (the frontend calls the API same-origin at `/api/*`, and Twilio/AssemblyAI webhooks share the same public URL). The Blueprint enables auto-deploy; the public URL is derived automatically from Render, and `SHARED_SECRET` / `TWILIO_STREAM_SECRET` are pre-generated — enter only `ASSEMBLYAI_API_KEY` plus any optional secrets in Render's environment settings.
 - **Browser-only demo:** [Open the GitHub Pages demo](https://elle31416.github.io/casa-verde-voice-order-agent/). It has no backend, phone tools, payment, or receipt delivery.
 
 ### Render environment reference
@@ -374,7 +374,7 @@ credentials (or `POST /api/phone/connect` against the deployed service). Notes:
 - Renaming the service or adding a custom domain needs no `render.yaml` change:
   the server re-derives the public URL on restart. Set `PUBLIC_URL` explicitly
   only if Render's external URL is not the URL callers/webhooks use.
-- The blueprint pins `branch: arena/01a09119-casa-verde-voice-order-agent`. After
+- The blueprint pins `branch: arena/01a093ca-casa-verde-voice-order-agent`. After
   merging to `main`, change the branch in the Render dashboard to `main`.
 - Render's free plan sleeps idle services; the first request (or Twilio webhook)
   after sleep pays a cold start of up to ~a minute. Use a paid instance type for
@@ -399,7 +399,7 @@ service behavior is unchanged when `VITE_API_BASE_URL` is unset.
 ## Static publishing
 
 GitHub Pages runs the browser UI in scripted-demo mode because it has no backend.
-The repository's Pages site must use the current Arena branch (`arena/01a09119-casa-verde-voice-order-agent`) with `/docs` if you want this branch's latest static build immediately. Alternatively, merge into `main` and keep the existing `main` / `/docs` Pages source (the `Deploy to GitHub Pages` workflow builds `dist/` with the project base path automatically).
+The repository's Pages site must use the current Arena branch (`arena/01a093ca-casa-verde-voice-order-agent`) with `/docs` if you want this branch's latest static build immediately. Alternatively, merge into `main` and keep the existing `main` / `/docs` Pages source (the `Deploy to GitHub Pages` workflow builds `dist/` with the project base path automatically).
 
 After frontend changes, refresh the committed static build:
 
